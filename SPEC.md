@@ -32,16 +32,6 @@ Rev 1 specced six days and got several things wrong. Changes:
 4. **No tuning values in code.** JSON only (§7).
 5. Snapshot at every stage exit. Append to `CODE_LOG.md`.
 
-### 0.1 Shared with Hardwicke
-
-Three modules built once, copied:
-
-- **Generic projectile system** — the parcel throw and the banana are the same thing with different parameters
-- **Tuning harness** — hot-reload JSON, slider overlay, write-back to disk
-- **Feedback module** — love/hate hotkeys, pause-and-note, audio flow questions
-
-Note it in both `CLAUDE.md` files so neither instance writes its own.
-
 ---
 
 ## 1. Product definition
@@ -129,14 +119,14 @@ The physics here is small enough to own: characters are circles doing per-pixel 
   /terrain     Mask, rendering, destruction, per-pixel queries
   /physics     Character controller, projectile integrator
   /monkey      Sprites, animation, health, state
-  /weapon      Banana bazooka (imports generic projectile — §0.1)
+  /weapon      Banana bazooka (imports the generic projectile system)
   /ai          Dumb opponent (§6.4)
   /turn        Turn state machine, win conditions
   /wind        Wind state and display
   /camera      Pan, zoom, follow, shake
   /hud         Aim UI, power, health, timer, wind gauge
   /tune        JSON load, hot reload, sliders
-  /feedback    From Hardwicke
+  /feedback    Playtest capture (§8)
 
 /tools
   masktool/    Standalone mask painting tool (§5.2)
@@ -371,7 +361,7 @@ Every value affecting feel lives in hot-reloadable JSON with a slider overlay an
 
 ## 8. Telemetry and feedback
 
-Import the Hardwicke feedback module (§0.1). Game-specific capture:
+Playtest capture, alongside the shot log below:
 
 - Shot log: angle, power, wind, distance to nearest enemy, damage dealt, self-damage
 - **Miss distance distribution** — the best single signal for whether the arc is readable. A long tail means the preview or wind display isn't working.

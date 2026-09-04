@@ -2,11 +2,10 @@ import { TUNE_CHANNEL, TUNE_ROUTE } from './channel.js';
 import { readPath, specByName, writePath, type TuneSpec } from './registry.js';
 
 /**
- * The tuning harness (SPEC §7, §0.1): slider overlay, hot reload, write-back.
+ * The tuning harness (SPEC §7): slider overlay, hot reload, write-back.
  *
- * Shared with the Hardwicke project — the generic half is this file and the
- * Vite plugin; the Banana-specific half is `registry.ts`. Copy those two and
- * supply a different registry.
+ * The generic half is this file and the Vite plugin; what is specific to this
+ * game lives in `registry.ts`, so the harness stays reusable.
  *
  * Dev only. `main.ts` imports it behind `import.meta.env.DEV`, so it does not
  * reach a production build.

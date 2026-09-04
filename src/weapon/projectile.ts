@@ -2,8 +2,8 @@ import { raycast, type RayHit } from '../terrain/query.js';
 import type { Mask } from '../terrain/mask.js';
 
 /**
- * The generic projectile system (SPEC §0.1) — parcels in Hardwicke, bananas
- * here, same integrator with different parameters.
+ * The generic projectile system: one integrator, parameterised, so anything
+ * else thrown through the air later uses the same arc.
  *
  * A point with gravity, linear drag and a constant wind for the turn. The path
  * is kept a **clean parabola**: a banana-shaped flight is a tempting joke that

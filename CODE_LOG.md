@@ -354,11 +354,14 @@ knockback; sliders live, write-back working.
 - Knockback in the dev harness is a placeholder radial impulse. The real curves
   — damage and knockback falling off **independently**, which is non-negotiable
   (SPEC §6.3) — are `weapon.json` and arrive with the bazooka in stage 4.
-- `/src/feedback` (the Hardwicke module, §0.1) is still unbuilt. I have no
-  access to a Hardwicke repository from this session to check whether the
-  tuning harness already exists there, so it was written here, with the generic
-  half (`harness.ts`, `channel.ts`, the Vite plugin) separated from the
-  Banana-specific half (`registry.ts`) so it can be copied across.
+- `/src/feedback` (SPEC §8) is still unbuilt; it lands in stage 9.
+- The harness keeps its generic half (`harness.ts`, `channel.ts`, the Vite
+  plugin) separate from the game-specific half (`registry.ts`), which is worth
+  keeping regardless of what it was originally meant to be shared with.
+
+  *Later correction: the "Hardwicke project" this stage referred to does not
+  exist. It came from `CLAUDE.md` §0.1, which has since been removed from both
+  documents.*
 
 ### Running it
 
@@ -383,7 +386,7 @@ do not proceed past a gate without human sign-off. So this stops here.
 ### Built
 
 ```
-/src/weapon/projectile.ts   generic projectile (shared, §0.1), exact integration
+/src/weapon/projectile.ts   generic projectile, exact integration
 /src/weapon/explosion.ts    damage and knockback on independent curves
 /src/wind/wind.ts           per-turn wind
 /src/ai/aim.ts              nearest target, angle search, Gaussian error

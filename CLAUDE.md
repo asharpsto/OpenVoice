@@ -50,16 +50,6 @@ TypeScript (strict) · Vite · PixiJS · Web Audio API · IndexedDB
 
 ---
 
-## Shared with the Hardwicke project
-
-Three modules are built once and copied between projects. Check whether Hardwicke has already built them before writing your own:
-
-- **Generic projectile system** — parcels there, bananas here. Same system, different parameters.
-- **Tuning harness** — hot-reload JSON, slider overlay, write-back.
-- **Feedback module** — love/hate hotkeys, pause-and-note, audio flow questions.
-
----
-
 ## Do not
 
 - Do not add a second weapon. One weapon is a deliberate decision (SPEC §1.3).
