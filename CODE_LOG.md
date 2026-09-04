@@ -156,3 +156,123 @@ Project Banana was built into the `asharpsto/OpenVoice` checkout, at the root
 layout SPEC §4.3 specifies. No OpenVoice file was modified; the two projects sit
 side by side. If Banana is meant to have its own repository, this tree moves
 across unchanged.
+
+---
+
+## Stage 2 — Mask tool (2026-09-04)
+
+Deliverable (SPEC §12, day 2): mask tool + first 2 maps baked.
+Exit criteria: two validated maps loading in the game.
+
+### Status: tool done and verified. Maps blocked — they need photographs.
+
+The tool half is finished and driven end to end in a headless browser. The maps
+half cannot be done here: SPEC §5.1 wants six to eight **hand-shot** maps chosen
+for silhouette variety, and pillar 1 is "your street — a real place the players
+recognise". Generating those would defeat the point of the feature. See *What is
+needed to close stage 2*.
+
+### Built
+
+```
+/tools/masktool
+  index.html     the tool's page
+  main.ts        canvas, pan/zoom, brush, undo, export
+  ops.ts         threshold seed, flood fill, despeckle, brush stamping
+/tools/smoke/masktool-smoke.ts   headless run of the whole tool
+/tests/masktool.test.ts          20 tests over the mask operations
+```
+
+All six features SPEC §5.2 asks for:
+
+1. **Auto first pass** — brightness + position threshold, both on sliders.
+2. **Paint and erase** — circular brush, size 1–120px, material by selection,
+   erase as material 0. Strokes interpolate, so a fast drag leaves no gaps.
+3. **Flood fill** — 4-connected, scanline. Tolerance 0 fills by mask; above 0 it
+   follows the photograph's colour, which is how a road gets filled in one click.
+4. **View toggle** — photo / mask / overlay at 50%.
+5. **Despeckle** — morphological close over the solid set, radius on a slider.
+6. **Export** — mask PNG (material IDs in the red channel) plus the texture.
+
+Plus two things not on the list that the tool is unusable without:
+
+- **Undo** (12 levels). "Ten minutes painting each mask" is not achievable if a
+  mis-click means starting again.
+- **Check playability** — runs the stage-1 validator in the tool and reports
+  coverage, spawn count and island spawns. Finding out a map is unplayable while
+  you are still holding the brush beats finding out at bake time.
+
+### Decisions
+
+- **The threshold seed stays a seed.** It is a brightness-plus-position rule and
+  nothing more. Growing it into segmentation is explicitly out (CLAUDE.md), and
+  the measurements below are a good argument for why.
+- **Painting happens at final resolution.** The photo is downscaled to the
+  2048px cap on load, using the same box filter the baker uses, so what is
+  painted is pixel-for-pixel what the game loads. Painting large and downscaling
+  the mask afterwards would move edges through the mode filter.
+- **Export verifies its own round-trip.** The mask is material IDs stored as
+  pixel values, so it must survive PNG encode/decode byte for byte. The tool
+  re-decodes what it just encoded and refuses to download if a single byte
+  moved. A silently corrupted mask is terrain that stops matching what the
+  painter drew, and it would not show up until a monkey fell through a wall.
+- **Overlay colours are not the game palette.** SPEC §11.2 reserves those
+  absolutely; a dev tool has no business spending them.
+
+### What broke on the way
+
+- **Morphological close thickened the silhouette near the map border.** Erosion
+  was treating a window that hangs over the edge as satisfied, so dilate grew
+  into the border and erode could not pull it back — a 3x3 block in a 5-row
+  image came back 5 rows tall. Outside the map is empty, the same rule the mask
+  itself follows, so a clipped window can never be full. Caught by a test
+  asserting close leaves the outline where it found it.
+- **The stand-in map's sky was unrealistically dim** — luma 153 against walls at
+  143, with ±13 grain on top. The threshold seed scored 77% against ground
+  truth, and the errors were exactly what the overlap predicts: 36.3% of sky
+  misread (predicted 36.5%), 24.8% of walls misread (predicted 24.0%). The seed
+  was correct; the fixture had accidentally reproduced the precise failure SPEC
+  §5.2 describes — "overcast sky is light grey and so is a rendered wall".
+  Real overcast sky sits near luma 190, so the stand-in was corrected to match
+  and the seed now scores 100% on it.
+
+  Worth keeping in mind: that 77% is what a brightness threshold does when sky
+  and wall are ten luma apart. It is the number that justifies the tool.
+
+### Measurements
+
+Threshold seed against the mask its fixture was generated from, 900x600:
+
+| sky vs wall luma | agreement |
+|---|---|
+| 153 vs 143, grain ±13 (unrealistic) | 77.0% |
+| 192 vs 143, grain ±13 (realistic) | 100.0% |
+
+A real photograph will land between the two and nearer the bottom — trees,
+shadowed brick and bright render all break the rule. The seed is worth having
+because it is free, not because it is right.
+
+### What is needed to close stage 2
+
+Photographs, and nothing else. For each map, one image:
+
+1. Drop it on `npm run masktool` → `http://localhost:5173/tools/masktool/`
+2. Threshold seed, then paint the materials in
+3. Despeckle, Check playability, Export
+4. `npm run bake -- --photo <id>-texture.png --mask <id>-mask.png --id <id> --water <row>`
+5. `npm run dev` → `?map=/maps/<id>/map.json`
+
+SPEC §5.1 picks maps on **silhouette variety**, not subject, because that is
+what makes them play differently when there is only one weapon: a tall building
+face, an open street, a hedge-and-fence garden, a car park, a bridge or
+underpass, something cluttered.
+
+Two validated maps close the stage; the remaining four to six are day 8.
+
+### Running it
+
+```
+npm test              # 83 tests (63 terrain, 20 mask ops)
+npm run masktool      # the tool, at /tools/masktool/
+npm run smoke:masktool  # headless: seed, paint, fill, despeckle, export
+```

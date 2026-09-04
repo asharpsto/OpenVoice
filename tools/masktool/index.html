@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project Banana — mask tool</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --panel: #12161d;
+        --line: #263041;
+        --ink: #e8eef5;
+        --dim: #8b9bb0;
+        --accent: #ff2e63;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e13; }
+      body {
+        color: var(--ink);
+        font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        display: grid;
+        grid-template-columns: 232px 1fr;
+      }
+      #panel {
+        background: var(--panel); border-right: 1px solid var(--line);
+        padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+      }
+      #stage { position: relative; overflow: hidden; }
+      canvas { display: block; cursor: crosshair; }
+      h1 { font-size: 12px; margin: 0; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+      section { display: flex; flex-direction: column; gap: 6px; }
+      section > h2 {
+        font-size: 10px; margin: 0; letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--dim); border-bottom: 1px solid var(--line); padding-bottom: 4px;
+      }
+      button {
+        font: inherit; color: var(--ink); background: #1a212c; border: 1px solid var(--line);
+        border-radius: 4px; padding: 6px 8px; cursor: pointer; text-align: left;
+      }
+      button:hover { border-color: #3a4759; }
+      button[aria-pressed='true'] { border-color: var(--accent); background: #241a22; }
+      button:disabled { opacity: 0.45; cursor: default; }
+      label { display: flex; justify-content: space-between; gap: 8px; align-items: center; color: var(--dim); }
+      input[type='range'] { width: 108px; accent-color: var(--accent); }
+      .swatch { display: inline-block; width: 10px; height: 10px; border: 1px solid #0006; margin-right: 7px; vertical-align: -1px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .key { color: #5d6b80; }
+      #status {
+        position: absolute; left: 12px; bottom: 12px; padding: 8px 10px; white-space: pre;
+        background: rgba(11, 14, 19, 0.86); border: 1px solid var(--line); border-radius: 5px;
+        pointer-events: none; max-width: calc(100% - 24px);
+      }
+      #drop {
+        position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+        color: var(--dim); background: #0b0e13; padding: 24px;
+      }
+      #drop.hidden { display: none; }
+      #drop strong { color: var(--ink); display: block; margin-bottom: 6px; font-size: 14px; }
+      .warn { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <div id="panel">
+      <h1>Mask tool</h1>
+
+      <section>
+        <h2>Photo</h2>
+        <input type="file" id="file" accept="image/*" />
+        <div id="photoInfo" class="key">no photo loaded</div>
+      </section>
+
+      <section>
+        <h2>Auto first pass</h2>
+        <label>brightness <input type="range" id="brightness" min="0" max="255" value="175" /></label>
+        <label>horizon <input type="range" id="horizon" min="0" max="100" value="55" /></label>
+        <button id="seed">Apply threshold seed</button>
+        <div class="key">A starting point, not a segmentation. Expect to paint over it.</div>
+      </section>
+
+      <section>
+        <h2>Material <span class="key">1–5, 0 erase</span></h2>
+        <div id="materials"></div>
+      </section>
+
+      <section>
+        <h2>Tool <span class="key">b / f</span></h2>
+        <div class="row">
+          <button id="toolBrush" aria-pressed="true">Brush</button>
+          <button id="toolFill" aria-pressed="false">Fill</button>
+        </div>
+        <label>brush size <input type="range" id="brush" min="1" max="120" value="18" /></label>
+        <label>fill tolerance <input type="range" id="tolerance" min="0" max="120" value="0" /></label>
+        <div class="key">Tolerance 0 fills by mask; above 0 follows the photo.</div>
+      </section>
+
+      <section>
+        <h2>Clean up</h2>
+        <label>despeckle radius <input type="range" id="despeckleRadius" min="1" max="6" value="2" /></label>
+        <button id="despeckle">Despeckle (close pinholes)</button>
+        <button id="undo">Undo <span class="key">z</span></button>
+      </section>
+
+      <section>
+        <h2>View <span class="key">v</span></h2>
+        <div class="row">
+          <button id="viewPhoto" aria-pressed="false">Photo</button>
+          <button id="viewMask" aria-pressed="false">Mask</button>
+        </div>
+        <button id="viewOverlay" aria-pressed="true">Overlay 50%</button>
+        <button id="fit">Fit to window <span class="key">0</span></button>
+      </section>
+
+      <section>
+        <h2>Export</h2>
+        <label>map id <input type="text" id="mapId" value="street" style="width: 108px; background: #1a212c; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; font: inherit;" /></label>
+        <button id="check">Check playability</button>
+        <button id="export">Export mask + texture</button>
+        <div class="key">Then: npm run bake -- --photo texture.png --mask mask.png --id &lt;id&gt;</div>
+      </section>
+    </div>
+
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+      <div id="status">load a photo to begin</div>
+      <div id="drop">
+        <div>
+          <strong>Drop a photograph here</strong>
+          or use the file picker. Anything over 2048px on its long edge is
+          downscaled on load, so you paint at the size the game uses.
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

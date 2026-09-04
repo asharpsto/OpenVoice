@@ -13,7 +13,9 @@
     "bench": "vitest bench --run",
     "bake": "tsx pipeline/bake.ts",
     "bench:blit": "tsx bench/blit.ts",
-    "smoke": "tsx tools/smoke/render-smoke.ts"
+    "smoke": "tsx tools/smoke/render-smoke.ts",
+    "smoke:masktool": "tsx tools/smoke/masktool-smoke.ts",
+    "masktool": "vite"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

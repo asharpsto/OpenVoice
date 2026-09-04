@@ -17,8 +17,13 @@ export interface SyntheticMap {
   waterLineY: number;
 }
 
+/**
+ * Stand-in colours. Sky is deliberately much brighter than any solid material:
+ * a real overcast sky reads around luma 190 where a rendered wall reads 140,
+ * and a fixture where the two overlap tests nothing but the noise.
+ */
 const MATERIAL_COLOURS: Record<MaterialId, [number, number, number]> = {
-  0: [136, 158, 176],
+  0: [178, 196, 212],
   1: [150, 142, 132],
   2: [116, 106, 96],
   3: [86, 112, 70],
