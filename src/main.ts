@@ -1,10 +1,18 @@
 import { Application, BufferImageSource, Container, Graphics, ImageSource, Texture } from 'pixi.js';
 import { FixedLoop } from './core/loop.js';
 import { mulberry32 } from './core/rng.js';
-import { applyImpulse, createBody, type Body } from './physics/body.js';
+import { createBody, type Body } from './physics/body.js';
+import { addAimError, nearestTarget, solveAim } from './ai/aim.js';
+import { applyBlast, shakeAt } from './weapon/explosion.js';
+import { launch, previewArc, stepProjectile, type Projectile } from './weapon/projectile.js';
+import { createWind, nextWind, windFraction, type Wind } from './wind/wind.js';
+import { getAiTune } from './tune/ai.js';
+import { getWeaponTune } from './tune/weapon.js';
+import { getWindTune } from './tune/wind.js';
+import { fallDamageFor } from './tune/monkey.js';
 import { CircleCollider } from './physics/collider.js';
 import { IDLE, stepCharacter, type CharacterInput } from './physics/controller.js';
-import { buildSyntheticMap } from './dev/syntheticMap.js';
+import { buildStreetScene } from './dev/streetScene.js';
 import { explode, type ExplosionResult } from './terrain/destroy.js';
 import { loadMap } from './terrain/load.js';
 import { BROADPHASE_CELL_SIZE, type Mask } from './terrain/mask.js';
@@ -30,17 +38,21 @@ import { getTerrainTune } from './tune/terrain.js';
  * "grey circles, one map, no art" (SPEC §12).
  */
 
-const SYNTHETIC_WIDTH = 2048;
-const SYNTHETIC_HEIGHT = 1536;
+const SYNTHETIC_WIDTH = 1600;
+const SYNTHETIC_HEIGHT = 1000;
 const BUDGET_MS = 4;
 const RADII = [20, 40, 80];
 const STEP_SECONDS = 1 / 60;
+/** Trajectory preview sampling. Mandatory, and never cut (SPEC §12.1). */
+const PREVIEW = { points: 46, secondsPerPoint: 0.07 };
+
 /**
- * Placeholder knockback so the controller can be pushed around. The real
- * curves — damage and knockback falling off independently — are weapon.json
- * and arrive with the bazooka in stage 4 (SPEC §6.3).
+ * Touch aiming is an open question, not a settled decision (SPEC §6.3): a
+ * thumb dragging from the monkey covers the monkey and the first part of the
+ * arc, which is exactly what you are trying to read. Both schemes are built so
+ * day 4 can decide by playing them.
  */
-const DEMO_KNOCKBACK = 520;
+type AimScheme = 'drag' | 'widget';
 
 const hud = document.getElementById('hud') as HTMLDivElement;
 
@@ -89,6 +101,7 @@ async function main(): Promise<void> {
     photo,
     rimDepthPx: tune.rim.depthPx,
     rimStrength: tune.rim.strength,
+    backdropStrength: tune.backdrop,
   });
   world.addChild(view.mesh);
 
@@ -106,31 +119,137 @@ async function main(): Promise<void> {
 
   function spawnBodies(): void {
     bodies.length = 0;
+    // Spread across the map but inset from both ends, so nobody starts with
+    // half of themselves off the edge of the screen.
     const spawns = validation.spawns;
     const wanted = Math.min(6, spawns.length);
+    const usable = spawns.filter(
+      (spawn) => spawn.x > width * 0.06 && spawn.x < width * 0.94,
+    );
+    const pool = usable.length >= wanted ? usable : spawns;
     for (let i = 0; i < wanted; i++) {
-      // Spread them across the map rather than bunching at one end.
-      const spawn = spawns[Math.floor((i * spawns.length) / wanted)];
+      const spawn = pool[Math.floor(((i + 0.5) * pool.length) / wanted)];
       bodies.push(createBody(spawn.x, spawn.y - getMonkeyTune().colliderRadius));
     }
     selected = 0;
   }
   spawnBodies();
 
+  const health: number[] = [];
+  function spawnHealth(): void {
+    health.length = 0;
+    for (let i = 0; i < bodies.length; i++) health.push(getMonkeyTune().health);
+  }
+  spawnHealth();
+
+  const aimLayer = new Graphics();
+  world.addChild(aimLayer);
+  const rng = mulberry32(20260904);
+  let wind: Wind = createWind(rng, getWindTune());
+  let scheme: AimScheme = 'drag';
+  let aimAngle = -Math.PI / 4;
+  let aimPower = 0.6;
+  let aiming = false;
+  let projectile: Projectile | null = null;
+  let shake = 0;
+  let lastShot = '';
+
+  function power(): number {
+    const weapon = getWeaponTune();
+    return (
+      weapon.muzzleVelocity.min +
+      (weapon.muzzleVelocity.max - weapon.muzzleVelocity.min) * Math.min(1, Math.max(0, aimPower))
+    );
+  }
+
+  function muzzle(body: Body): { x: number; y: number } {
+    const offset = collider.radius + 5;
+    return { x: body.x + Math.cos(aimAngle) * offset, y: body.y + Math.sin(aimAngle) * offset };
+  }
+
+  function fireBanana(): void {
+    const body = bodies[selected];
+    if (!body || projectile) return;
+    const start = muzzle(body);
+    projectile = launch(start.x, start.y, aimAngle, power());
+    aiming = false;
+  }
+
+  function detonate(x: number, y: number): void {
+    const weapon = getWeaponTune();
+    const terrain = getTerrainTune();
+    const monkeyTune = getMonkeyTune();
+    const result = explode(mask, x, y, weapon.blastRadius, terrain);
+    if (result.clearedTotal > 0) view.applyExplosion(result);
+
+    let worst = '';
+    for (const effect of applyBlast(bodies, x, y, weapon)) {
+      health[effect.index] -= effect.damage;
+      if (effect.index === selected && effect.damage > 0) {
+        worst = `self-damage ${effect.damage.toFixed(0)}`;
+      }
+    }
+    const distance = bodies[selected] ? Math.hypot(bodies[selected].x - x, bodies[selected].y - y) : 0;
+    shake = Math.max(shake, shakeAt(distance, weapon.shake.max, weapon.shake.radius));
+    lastShot = `hit at ${x.toFixed(0)},${y.toFixed(0)}${worst ? ` · ${worst}` : ''}`;
+    void monkeyTune;
+    // Wind changes each turn; firing ends the turn in the real machine (stage 5).
+    wind = nextWind(wind, rng, getWindTune());
+  }
+
+  function aiTurn(): void {
+    const weapon = getWeaponTune();
+    const ai = getAiTune();
+    const shooter = bodies[selected];
+    if (!shooter || projectile) return;
+    const enemies = bodies.filter((_, i) => i !== selected && health[i] > 0);
+    if (enemies.length === 0) return;
+    const target = enemies[nearestTarget(shooter.x, shooter.y, enemies)];
+    const solution = solveAim(
+      shooter.x, shooter.y, target.x, target.y,
+      weapon.muzzleVelocity.max * 0.85,
+      getPhysicsTune().gravity, wind.x, weapon.projectile, ai.searchAngles,
+    );
+    const shot = addAimError(solution, rng, ai.aimErrorSigma);
+    aimAngle = shot.angle;
+    aimPower =
+      (shot.power - weapon.muzzleVelocity.min) /
+      (weapon.muzzleVelocity.max - weapon.muzzleVelocity.min);
+    lastShot = `AI aims, miss estimate ${solution.missDistance.toFixed(0)}px`;
+    fireBanana();
+  }
+
   const simulation = new FixedLoop(STEP_SECONDS, (dt) => {
     const physics = getPhysicsTune();
     const monkeyTune = getMonkeyTune();
-    for (let i = 0; i < bodies.length; i++) {
-      stepCharacter(
-        bodies[i],
-        i === selected ? input : IDLE,
-        mask,
-        collider,
-        physics,
-        monkeyTune,
-        dt,
+    const weapon = getWeaponTune();
+    const terrain = getTerrainTune();
+
+    if (projectile) {
+      const step = stepProjectile(
+        projectile, dt, mask, physics.gravity, wind.x, weapon.projectile, terrain.query.raycastStepPx,
       );
+      if (step.hit) {
+        detonate(projectile.x, projectile.y);
+        projectile = null;
+      } else if (step.offMap || projectile.age > 12) {
+        lastShot = 'off the map';
+        projectile = null;
+        wind = nextWind(wind, rng, getWindTune());
+      }
     }
+
+    for (let i = 0; i < bodies.length; i++) {
+      const wasAirborne = !bodies[i].grounded;
+      stepCharacter(bodies[i], i === selected ? input : IDLE, mask, collider, physics, monkeyTune, dt);
+      if (wasAirborne && bodies[i].grounded && bodies[i].lastImpactSpeed > 0) {
+        health[i] -= fallDamageFor(bodies[i].lastImpactSpeed, monkeyTune);
+        bodies[i].lastImpactSpeed = 0;
+      }
+      // Water at the bottom of the map is instant death (SPEC §6.2).
+      if (bodies[i].y > mask.height) health[i] = 0;
+    }
+    shake *= 0.88;
   });
 
   function drawBodies(): void {
@@ -138,13 +257,45 @@ async function main(): Promise<void> {
     const radius = collider.radius;
     for (let i = 0; i < bodies.length; i++) {
       const body = bodies[i];
+      if (health[i] <= 0) continue;
       bodyLayer.circle(body.x, body.y, radius);
       bodyLayer.fill({ color: i === selected ? 0xff2e63 : 0xb8c4d4, alpha: 0.92 });
-      if (!body.grounded) {
-        bodyLayer.circle(body.x, body.y, radius + 3);
-        bodyLayer.stroke({ width: 1.5, color: 0xffd23f, alpha: 0.7 });
-      }
+      // Health bar in the reserved UI accent (SPEC §11.2).
+      const ratio = Math.max(0, health[i]) / getMonkeyTune().health;
+      bodyLayer.rect(body.x - radius, body.y - radius - 9, radius * 2, 3);
+      bodyLayer.fill({ color: 0x0e1116, alpha: 0.75 });
+      bodyLayer.rect(body.x - radius, body.y - radius - 9, radius * 2 * ratio, 3);
+      bodyLayer.fill({ color: 0xff2e63 });
     }
+  }
+
+  /** Dotted arc including wind, fading with distance so it hints, not solves. */
+  function drawAim(): void {
+    aimLayer.clear();
+    const body = bodies[selected];
+
+    if (projectile) {
+      aimLayer.circle(projectile.x, projectile.y, 5);
+      aimLayer.fill({ color: 0xffd23f });
+      return;
+    }
+    if (!body || health[selected] <= 0) return;
+
+    const weapon = getWeaponTune();
+    const start = muzzle(body);
+    const arc = previewArc(
+      start.x, start.y, aimAngle, power(), mask,
+      getPhysicsTune().gravity, wind.x, weapon.projectile, PREVIEW,
+    );
+    for (let i = 0; i < arc.length; i++) {
+      const fade = 1 - i / arc.length;
+      aimLayer.circle(arc[i].x, arc[i].y, 2.4);
+      aimLayer.fill({ color: 0xff2e63, alpha: 0.15 + fade * 0.75 });
+    }
+    // Power as a stub from the muzzle, so the drag length is readable.
+    aimLayer.moveTo(body.x, body.y);
+    aimLayer.lineTo(start.x + Math.cos(aimAngle) * 26 * aimPower, start.y + Math.sin(aimAngle) * 26 * aimPower);
+    aimLayer.stroke({ width: 2, color: 0xff2e63, alpha: 0.9 });
   }
 
   const frames = new Samples();
@@ -154,15 +305,14 @@ async function main(): Promise<void> {
   let last: (ExplosionResult & { blitMs: number }) | null = null;
   let radius = RADII[1];
   let stressLeft = 0;
-  const rng = mulberry32(20260904);
 
+  const worldHome = { x: 0, y: 0 };
   function fit(): void {
     const scale = Math.min(app.screen.width / width, app.screen.height / height);
     world.scale.set(scale);
-    world.position.set(
-      (app.screen.width - width * scale) / 2,
-      (app.screen.height - height * scale) / 2,
-    );
+    worldHome.x = (app.screen.width - width * scale) / 2;
+    worldHome.y = (app.screen.height - height * scale) / 2;
+    world.position.set(worldHome.x, worldHome.y);
   }
   fit();
   app.renderer.on('resize', fit);
@@ -173,17 +323,8 @@ async function main(): Promise<void> {
     const blitMs = performance.now() - t0;
     if (result.clearedTotal === 0) return;
     view.applyExplosion(result);
-    for (const body of bodies) {
-      const dx = body.x - x;
-      const dy = body.y - y;
-      const distance = Math.hypot(dx, dy);
-      if (distance > radius * 3 || distance < 0.001) continue;
-      const falloff = 1 - distance / (radius * 3);
-      applyImpulse(
-        body,
-        (dx / distance) * DEMO_KNOCKBACK * falloff,
-        (dy / distance) * DEMO_KNOCKBACK * falloff,
-      );
+    for (const effect of applyBlast(bodies, x, y, getWeaponTune())) {
+      health[effect.index] -= effect.damage;
     }
     const upload = view.lastUpload;
     last = { ...result, blitMs };
@@ -194,13 +335,64 @@ async function main(): Promise<void> {
     }
   }
 
-  app.canvas.addEventListener('pointerdown', (event: PointerEvent) => {
+  const WIDGET = { x: 128, y: 0, radius: 92 };
+  function widgetCentre(): { x: number; y: number } {
+    return { x: WIDGET.x, y: app.screen.height - 132 };
+  }
+  function toWorld(event: PointerEvent): { x: number; y: number } {
     const bounds = app.canvas.getBoundingClientRect();
-    const local = world.toLocal({
-      x: event.clientX - bounds.left,
-      y: event.clientY - bounds.top,
-    });
-    fire(local.x, local.y);
+    return world.toLocal({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
+  }
+
+  function setAimFrom(dx: number, dy: number, span: number): void {
+    // Drag backwards to aim, like drawing a bow: the arc goes where the sling
+    // is pulled from, and the finger stays off the part of the arc you read.
+    aimAngle = Math.atan2(-dy, -dx);
+    aimPower = Math.min(1, Math.hypot(dx, dy) / span);
+  }
+
+  app.canvas.addEventListener('pointerdown', (event: PointerEvent) => {
+    app.canvas.setPointerCapture(event.pointerId);
+    if (event.shiftKey) {
+      fire(toWorld(event).x, toWorld(event).y); // spot blast, for terrain testing
+      return;
+    }
+    if (scheme === 'widget') {
+      const centre = widgetCentre();
+      const bounds = app.canvas.getBoundingClientRect();
+      const px = event.clientX - bounds.left;
+      const py = event.clientY - bounds.top;
+      if (Math.hypot(px - centre.x, py - centre.y) <= WIDGET.radius) {
+        aiming = true;
+        setAimFrom(px - centre.x, py - centre.y, WIDGET.radius);
+      }
+      return;
+    }
+    const body = bodies[selected];
+    if (!body) return;
+    const local = toWorld(event);
+    aiming = true;
+    setAimFrom(local.x - body.x, local.y - body.y, 190);
+  });
+
+  app.canvas.addEventListener('pointermove', (event: PointerEvent) => {
+    if (!aiming) return;
+    if (scheme === 'widget') {
+      const centre = widgetCentre();
+      const bounds = app.canvas.getBoundingClientRect();
+      setAimFrom(event.clientX - bounds.left - centre.x, event.clientY - bounds.top - centre.y, WIDGET.radius);
+      return;
+    }
+    const body = bodies[selected];
+    if (!body) return;
+    const local = toWorld(event);
+    setAimFrom(local.x - body.x, local.y - body.y, 190);
+  });
+
+  app.canvas.addEventListener('pointerup', () => {
+    if (!aiming) return;
+    aiming = false;
+    fireBanana();
   });
 
   function drawGrid(): void {
@@ -223,6 +415,7 @@ async function main(): Promise<void> {
     mask = (await loadTerrain()).mask;
     view.replaceMask(mask);
     spawnBodies();
+    spawnHealth();
     destruction.clear();
     blits.clear();
     uploads.clear();
@@ -254,6 +447,14 @@ async function main(): Promise<void> {
     if (key === ' ') {
       input.jump = true;
       event.preventDefault();
+    } else if (key === 'f') {
+      fireBanana();
+    } else if (key === 'i') {
+      aiTurn();
+    } else if (key === 'm') {
+      scheme = scheme === 'drag' ? 'widget' : 'drag';
+    } else if (key === 'w') {
+      wind = nextWind(wind, rng, getWindTune());
     } else if (key === 'tab') {
       selected = bodies.length === 0 ? 0 : (selected + 1) % bodies.length;
       event.preventDefault();
@@ -283,6 +484,7 @@ async function main(): Promise<void> {
           const terrain = getTerrainTune();
           view.setRimDepth(terrain.rim.depthPx);
           view.rimStrength = terrain.rim.strength;
+          view.backdropStrength = terrain.backdrop;
           view.uploadAll();
         }
       },
@@ -316,6 +518,15 @@ async function main(): Promise<void> {
     frames.push(ticker.deltaMS);
     simulation.advance(ticker.deltaMS);
     drawBodies();
+    drawAim();
+    if (shake > 0.4) {
+      world.position.set(
+        worldHome.x + (Math.random() - 0.5) * shake,
+        worldHome.y + (Math.random() - 0.5) * shake,
+      );
+    } else if (world.position.x !== worldHome.x || world.position.y !== worldHome.y) {
+      world.position.set(worldHome.x, worldHome.y);
+    }
     if (stressLeft > 0) {
       stressLeft--;
       fire(rng() * width, height * 0.4 + rng() * height * 0.55);
@@ -333,8 +544,11 @@ async function main(): Promise<void> {
       `frame    p50 ${frames.percentile(0.5).toFixed(2)}ms  p99 ${frames.percentile(0.99).toFixed(2)}ms`,
       `radius   ${radius}px${stressLeft > 0 ? `   stress ${stressLeft} left` : ''}`,
       bodies.length > 0
-        ? `body     ${selected + 1}/${bodies.length}  ${bodies[selected].grounded ? 'grounded' : 'airborne'}${bodies[selected].atRest ? ' · at rest' : ''}  r${collider.radius}`
+        ? `body     ${selected + 1}/${bodies.length}  hp ${Math.max(0, health[selected]).toFixed(0)}  ${bodies[selected].grounded ? 'grounded' : 'airborne'}${bodies[selected].atRest ? ' · at rest' : ''}`
         : 'body     —',
+      `wind     ${wind.x < 0 ? '<<' : '>>'} ${Math.abs(wind.x).toFixed(0)}  (${(windFraction(wind, getWindTune()) * 100).toFixed(0)}%)`,
+      `aim      ${scheme}  ${((-aimAngle * 180) / Math.PI).toFixed(0)}°  power ${(aimPower * 100).toFixed(0)}%`,
+      `shot     ${lastShot || '—'}`,
       '',
       last
         ? `last     cleared ${last.clearedTotal}px  dirty ${last.dirtyRect.width}x${last.dirtyRect.height}  ${((view.lastUpload?.bytes ?? 0) / 1024).toFixed(1)}KB`
@@ -370,12 +584,12 @@ async function loadTerrain(): Promise<{
       label: loaded.manifest.name,
     };
   }
-  const synthetic = buildSyntheticMap(SYNTHETIC_WIDTH, SYNTHETIC_HEIGHT, 7);
+  const synthetic = buildStreetScene(SYNTHETIC_WIDTH, SYNTHETIC_HEIGHT, 11);
   return {
     mask: synthetic.mask,
     photo: new Texture({
       source: new BufferImageSource({
-        resource: synthetic.photo,
+        resource: synthetic.pixels,
         width: SYNTHETIC_WIDTH,
         height: SYNTHETIC_HEIGHT,
         format: 'rgba8unorm',
@@ -383,7 +597,7 @@ async function loadTerrain(): Promise<{
       }),
     }),
     waterLineY: synthetic.waterLineY,
-    label: 'synthetic',
+    label: 'stand-in street',
   };
 }
 

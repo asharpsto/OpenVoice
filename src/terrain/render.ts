@@ -51,6 +51,7 @@ out vec4 finalColor;
 uniform sampler2D uPhoto;
 uniform sampler2D uMask;
 uniform float uRimStrength;
+uniform float uBackdrop;
 
 void main(void) {
     vec2 mask = texture(uMask, vUV).rg;
@@ -59,7 +60,16 @@ void main(void) {
     vec3 photo = texture(uPhoto, vUV).rgb;
     // G is the rim shade: 1 at a fresh edge, falling to 0 rimDepthPx inside it.
     vec3 shaded = photo * (1.0 - mask.g * uRimStrength);
-    finalColor = vec4(shaded, 1.0) * solid * vColor;
+
+    // Empty pixels still show the photograph, dimmed and pushed towards grey.
+    // Discarding them entirely is what the mask means for *collision*, but it
+    // throws the sky away and leaves the map a cut-out on the app background —
+    // which stops it looking like the place it was shot in. Terrain is drawn
+    // at full strength on top, so the silhouette still reads hard.
+    float grey = dot(photo, vec3(0.299, 0.587, 0.114));
+    vec3 backdrop = mix(vec3(grey), photo, 0.35) * uBackdrop;
+
+    finalColor = vec4(mix(backdrop, shaded, solid), 1.0) * vColor;
 }
 `;
 
@@ -91,6 +101,8 @@ export interface TerrainViewOptions {
   rimDepthPx: number;
   /** `tune/terrain.json` rim.strength — how much to darken. */
   rimStrength: number;
+  /** `tune/terrain.json` backdrop — how brightly non-solid photo shows through. */
+  backdropStrength: number;
 }
 
 /** Pixi's Mesh wants a shader that carries its texture; ours carries the photo. */
@@ -101,7 +113,10 @@ export class TerrainView {
   private readonly renderer: GlRendererLike;
   private mask: Mask;
   private readonly maskSource: BufferImageSource;
-  private readonly uniforms: UniformGroup<{ uRimStrength: { value: number; type: 'f32' } }>;
+  private readonly uniforms: UniformGroup<{
+    uRimStrength: { value: number; type: 'f32' };
+    uBackdrop: { value: number; type: 'f32' };
+  }>;
   private rimDepthPx: number;
   /** Reused patch buffer, so a crater does not allocate mid-frame. */
   private scratch: Uint8Array;
@@ -135,7 +150,10 @@ export class TerrainView {
     });
     this.scratch = new Uint8Array(0);
 
-    this.uniforms = new UniformGroup({ uRimStrength: { value: options.rimStrength, type: 'f32' } });
+    this.uniforms = new UniformGroup({
+      uRimStrength: { value: options.rimStrength, type: 'f32' },
+      uBackdrop: { value: options.backdropStrength, type: 'f32' },
+    });
     const shader = new Shader({
       glProgram: GlProgram.from({ vertex, fragment, name: 'terrain' }),
       resources: {
@@ -162,6 +180,14 @@ export class TerrainView {
 
   set rimStrength(value: number) {
     this.uniforms.uniforms.uRimStrength = value;
+  }
+
+  get backdropStrength(): number {
+    return this.uniforms.uniforms.uBackdrop;
+  }
+
+  set backdropStrength(value: number) {
+    this.uniforms.uniforms.uBackdrop = value;
   }
 
   /** Kept in step with `tune/terrain.json` when the stage-3 harness reloads it. */

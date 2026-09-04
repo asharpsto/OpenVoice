@@ -1,0 +1,26 @@
+{
+  "$comment": "Banana bazooka. SPEC §6.3, §7. Damage and knockback fall off independently — that gap is where the memorable moments live.",
+  "muzzleVelocity": { "min": 180, "max": 720 },
+  "projectile": {
+    "drag": 0.22,
+    "gravityScale": 1,
+    "windInfluence": 1,
+    "spinRate": 12
+  },
+  "blastRadius": 78,
+  "damage": {
+    "max": 52,
+    "radius": 92,
+    "falloffPower": 1.7
+  },
+  "knockback": {
+    "max": 620,
+    "radius": 150,
+    "falloffPower": 0.85
+  },
+  "selfPropelGapMin": 120,
+  "shake": {
+    "max": 26,
+    "radius": 420
+  }
+}

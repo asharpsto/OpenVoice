@@ -1,0 +1,5 @@
+{
+  "$comment": "Wind. SPEC §6.3, §7. The main source of turn-to-turn variety in a one-weapon game, so the range has to be generous enough to matter.",
+  "maxStrength": 190,
+  "changePerTurn": 0.75
+}

@@ -39,6 +39,11 @@ export interface ValidationTune {
 
 export interface TerrainTune {
   /**
+   * How brightly the photograph shows through where the mask is empty, 0..1.
+   * 0 discards the sky and leaves a cut-out on the app background.
+   */
+  backdrop: number;
+  /**
    * Per-material blast resistance (SPEC §5.3). Effective crater radius at a
    * pixel is `radius / blastResistance[material]`, so high resistance means a
    * small crater. Indexed by material ID; index 0 (empty) is unused.
@@ -57,6 +62,7 @@ export interface TerrainTune {
 }
 
 export interface TerrainTuneJson {
+  backdrop: number;
   blastResistance: Record<string, number>;
   rim: RimTune;
   query: QueryTune;
@@ -87,6 +93,9 @@ export function parseTerrainTune(raw: TerrainTuneJson): TerrainTune {
   if (raw.rim.strength < 0 || raw.rim.strength > 1) {
     throw new Error(`tune/terrain.json: rim.strength must be within 0..1`);
   }
+  if (raw.backdrop < 0 || raw.backdrop > 1) {
+    throw new Error(`tune/terrain.json: backdrop must be within 0..1`);
+  }
   positive(raw.query.raycastStepPx, 'query.raycastStepPx');
   if (raw.query.raycastStepPx > 1) {
     throw new Error(`tune/terrain.json: query.raycastStepPx must be sub-pixel (<= 1)`);
@@ -98,6 +107,7 @@ export function parseTerrainTune(raw: TerrainTuneJson): TerrainTune {
     maxRadiusScale = Math.max(maxRadiusScale, radiusScale[id]);
   }
   return {
+    backdrop: raw.backdrop,
     blastResistance,
     radiusScale,
     maxRadiusScale,

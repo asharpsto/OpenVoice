@@ -1,9 +1,17 @@
 import terrainRaw from '../../tune/terrain.json';
+import weaponRaw from '../../tune/weapon.json';
+import windRaw from '../../tune/wind.json';
+import aiRaw from '../../tune/ai.json';
 import physicsRaw from '../../tune/physics.json';
 import monkeyRaw from '../../tune/monkey.json';
 import { parseTerrainTune, setTerrainTune, type TerrainTuneJson } from './terrain.js';
 import { parsePhysicsTune, setPhysicsTune, type PhysicsTune } from './physics.js';
 import { parseMonkeyTune, setMonkeyTune, type MonkeyTune } from './monkey.js';
+import { parseWeaponTune, setWeaponTune, type WeaponTune } from './weapon.js';
+import { parseWindTune, setWindTune } from './wind.js';
+import { parseAiTune, setAiTune } from './ai.js';
+import type { AiTune } from '../ai/aim.js';
+import type { WindTune } from '../wind/wind.js';
 
 /**
  * What the slider overlay knows about the tuning files (SPEC §7).
@@ -66,6 +74,7 @@ const terrain: TuneSpec = {
     { path: 'blastResistance.pole', min: 0.1, max: 3, step: 0.05 },
     { path: 'rim.depthPx', min: 0, max: 12, step: 1 },
     { path: 'rim.strength', min: 0, max: 1, step: 0.01 },
+    { path: 'backdrop', min: 0, max: 1, step: 0.01 },
     { path: 'query.raycastStepPx', min: 0.05, max: 1, step: 0.05 },
   ],
   apply() {
@@ -109,8 +118,57 @@ const monkey: TuneSpec = {
   },
 };
 
-/** Every tunable file. Weapon, wind, turn and ai join as their stages land. */
-export const TUNE_SPECS: TuneSpec[] = [terrain, physics, monkey];
+const weapon: TuneSpec = {
+  name: 'weapon',
+  raw: copy(weaponRaw) as unknown as Record<string, unknown>,
+  fields: [
+    { path: 'muzzleVelocity.min', min: 50, max: 600, step: 10 },
+    { path: 'muzzleVelocity.max', min: 200, max: 1400, step: 10 },
+    { path: 'projectile.drag', min: 0, max: 1.5, step: 0.01 },
+    { path: 'projectile.windInfluence', min: 0, max: 3, step: 0.05 },
+    { path: 'blastRadius', min: 10, max: 220, step: 2 },
+    // Damage and knockback are separate curves on purpose (SPEC §6.3): the gap
+    // between them is where this genre's best moments come from, so they get
+    // separate sliders and must never be ganged together.
+    { path: 'damage.max', min: 0, max: 120, step: 1 },
+    { path: 'damage.radius', min: 10, max: 320, step: 2 },
+    { path: 'damage.falloffPower', min: 0.2, max: 4, step: 0.05 },
+    { path: 'knockback.max', min: 0, max: 1600, step: 10 },
+    { path: 'knockback.radius', min: 10, max: 400, step: 2 },
+    { path: 'knockback.falloffPower', min: 0.2, max: 4, step: 0.05 },
+    { path: 'shake.max', min: 0, max: 80, step: 1 },
+  ],
+  apply() {
+    setWeaponTune(parseWeaponTune(this.raw as unknown as WeaponTune));
+  },
+};
+
+const wind: TuneSpec = {
+  name: 'wind',
+  raw: copy(windRaw) as unknown as Record<string, unknown>,
+  fields: [
+    { path: 'maxStrength', min: 0, max: 600, step: 10 },
+    { path: 'changePerTurn', min: 0, max: 1, step: 0.05 },
+  ],
+  apply() {
+    setWindTune(parseWindTune(this.raw as unknown as WindTune));
+  },
+};
+
+const ai: TuneSpec = {
+  name: 'ai',
+  raw: copy(aiRaw) as unknown as Record<string, unknown>,
+  fields: [
+    { path: 'aimErrorSigma.angleRadians', min: 0, max: 0.4, step: 0.005 },
+    { path: 'aimErrorSigma.powerFraction', min: 0, max: 0.4, step: 0.005 },
+  ],
+  apply() {
+    setAiTune(parseAiTune(this.raw as unknown as AiTune));
+  },
+};
+
+/** Every tunable file. `turn.json` joins with the turn machine in stage 5. */
+export const TUNE_SPECS: TuneSpec[] = [terrain, physics, monkey, weapon, wind, ai];
 
 export function specByName(name: string): TuneSpec | undefined {
   return TUNE_SPECS.find((spec) => spec.name === name);

@@ -367,3 +367,91 @@ npm test              # 102 tests
 npm run smoke:tune    # sliders live, write-back and hot reload against disk
 npm run dev           # [←/→] walk · [space] jump · [tab] next body · [t] tuning
 ```
+
+---
+
+## Stage 4 — Banana bazooka + dumb AI (2026-09-04)
+
+Deliverable (SPEC §12, day 4): banana bazooka, dumb AI, touch input decision.
+Exit criteria: firing works, AI plays, both aim schemes built and one chosen.
+
+### Status: built. **The choice is yours — gate 1 is a hard stop.**
+
+Both aim schemes are built; §6.3 says decide by testing them, and CLAUDE.md says
+do not proceed past a gate without human sign-off. So this stops here.
+
+### Built
+
+```
+/src/weapon/projectile.ts   generic projectile (shared, §0.1), exact integration
+/src/weapon/explosion.ts    damage and knockback on independent curves
+/src/wind/wind.ts           per-turn wind
+/src/ai/aim.ts              nearest target, angle search, Gaussian error
+/tune/weapon.json /tune/wind.json /tune/ai.json
+/tests/weapon.test.ts       11 tests, including self-propulsion
+```
+
+Also fixed two things flagged earlier and left undone:
+
+- **The sky is no longer thrown away.** Empty pixels now draw the photograph
+  dimmed and desaturated as a backdrop, with terrain at full strength on top.
+  The mask still means exactly what it meant for collision; it just no longer
+  means "paint the app background here". `backdrop` is a slider.
+- **The stand-in map is the street generator**, not flat colour blocks. It was
+  already written for the how-it-works demo and sitting unused, which was
+  daft — judging whether the game is fun against flat blocks is its own kind of
+  misleading.
+
+### Decisions
+
+- **Exact integration, not Euler.** Drag is linear, so a step has a closed form.
+  Using it makes the shot land precisely where the preview said it would.
+  Euler at 1/120s drifted 7.6px over a two-second flight, and a preview that
+  disagrees with the shot teaches players to stop trusting it — which would
+  undo pillar 2, the whole game being the reading of an arc.
+- **Damage and knockback are separate curves with separate maxima, radii and
+  falloff powers.** Non-negotiable per §6.3, and there is a test asserting a
+  shot that does zero damage still throws a body hard.
+- **The AI solves by sampling angles against the analytic path.** Drag makes a
+  closed-form solve unpleasant, and sampling costs no simulation and stays
+  robust to whatever tuning does to the arc later.
+- **The arc stays a clean parabola.** A banana-shaped flight is a tempting joke
+  that would wreck the pillar; the sprite spins instead.
+
+### What broke on the way
+
+- **The closed-form solution had a sign error** — expanded at small drag it gave
+  −½at² instead of +½at². The shot flew true because the integrator was
+  separate, but the **trajectory preview curved the wrong way and the AI aimed
+  at nonsense**, both of which read the same function. Caught by the §10 test
+  pinning the integrator to the analytic arc: drift was 3201px.
+- **Self-propulsion does not work by firing straight down.** A blast directly
+  beneath throws a body straight up, and it lands where it started, having
+  crossed nothing. The manoeuvre is to fire into the ground on the *trailing*
+  side. The test now models that, and the current tuning clears the 120px
+  `selfPropelGapMin` with 62 health to spare.
+- An aim-solver test was failing because the target was simply out of range at
+  that power. Targets are now picked by flying a known shot, so a solution
+  provably exists.
+
+### Not done, deliberately
+
+- **Turn machine, teams, win conditions** — stage 5. Health and damage are
+  tracked in the harness so shots visibly matter; that is not the state machine
+  and does not pretend to be.
+- **Camera** — stage 6. The map is still fit to the window, so a 1600px map is
+  drawn at whatever fits.
+- **Sprites, sound, HUD** — stages 7 and 9. Gate 1 is explicitly meant to be
+  judged on grey circles.
+
+### Gate 1 — what to do
+
+`npm run dev`, then play for twenty minutes. The question is only: **is firing
+satisfying?** Not whether it looks good — it deliberately does not.
+
+- Drag from a monkey and release to fire; `[m]` swaps to the corner widget.
+  §6.3 says decide between them by testing, so try both and say which.
+- `[i]` takes an AI shot, `[w]` rerolls the wind, `[t]` opens the sliders.
+- If it is not fun, the answer is to tune, not to build stage 5. Everything
+  that affects feel is on a slider and writes back to disk, so what you land on
+  is kept.

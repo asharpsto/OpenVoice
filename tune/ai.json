@@ -1,0 +1,10 @@
+{
+  "$comment": "Dumb AI. SPEC §6.4, §7. aimErrorSigma is the difficulty dial: turn it up to make it useless, down to make it lethal.",
+  "aimErrorSigma": { "angleRadians": 0.075, "powerFraction": 0.07 },
+  "difficulty": {
+    "hopeless": { "angleRadians": 0.22, "powerFraction": 0.2 },
+    "fair": { "angleRadians": 0.075, "powerFraction": 0.07 },
+    "lethal": { "angleRadians": 0.012, "powerFraction": 0.012 }
+  },
+  "searchAngles": 96
+}

@@ -11,6 +11,7 @@
     "depthPx": 4,
     "strength": 0.6
   },
+  "backdrop": 0.34,
   "query": {
     "raycastStepPx": 0.25
   },

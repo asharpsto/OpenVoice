@@ -3,6 +3,7 @@ import { BUILDING, GROUND, POLE, VEGETATION, VEHICLE } from '../src/terrain/mate
 import { getTerrainTune, parseTerrainTune, type TerrainTuneJson } from '../src/tune/terrain.js';
 
 const valid: TerrainTuneJson = {
+  backdrop: 0.34,
   blastResistance: { building: 2, ground: 1, vegetation: 0.5, vehicle: 0.5, pole: 0.25 },
   rim: { depthPx: 4, strength: 0.6 },
   query: { raycastStepPx: 0.25 },
