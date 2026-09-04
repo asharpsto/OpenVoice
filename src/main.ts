@@ -1,11 +1,17 @@
 import { Application, BufferImageSource, Container, Graphics, ImageSource, Texture } from 'pixi.js';
+import { FixedLoop } from './core/loop.js';
 import { mulberry32 } from './core/rng.js';
+import { applyImpulse, createBody, type Body } from './physics/body.js';
+import { CircleCollider } from './physics/collider.js';
+import { IDLE, stepCharacter, type CharacterInput } from './physics/controller.js';
 import { buildSyntheticMap } from './dev/syntheticMap.js';
 import { explode, type ExplosionResult } from './terrain/destroy.js';
 import { loadMap } from './terrain/load.js';
 import { BROADPHASE_CELL_SIZE, type Mask } from './terrain/mask.js';
 import { TerrainView } from './terrain/render.js';
 import { validateMap } from './terrain/validate.js';
+import { getMonkeyTune } from './tune/monkey.js';
+import { getPhysicsTune } from './tune/physics.js';
 import { getTerrainTune } from './tune/terrain.js';
 
 /**
@@ -18,12 +24,23 @@ import { getTerrainTune } from './tune/terrain.js';
  *
  * With no `?map=` it generates a stand-in map, since no photograph has been
  * baked yet; `?map=/maps/<id>/map.json` loads a real one.
+ *
+ * From stage 3 it also carries grey circles running the stepped character
+ * controller, which is deliberately what gate 1 wants to be tested with:
+ * "grey circles, one map, no art" (SPEC §12).
  */
 
 const SYNTHETIC_WIDTH = 2048;
 const SYNTHETIC_HEIGHT = 1536;
 const BUDGET_MS = 4;
 const RADII = [20, 40, 80];
+const STEP_SECONDS = 1 / 60;
+/**
+ * Placeholder knockback so the controller can be pushed around. The real
+ * curves — damage and knockback falling off independently — are weapon.json
+ * and arrive with the bazooka in stage 4 (SPEC §6.3).
+ */
+const DEMO_KNOCKBACK = 520;
 
 const hud = document.getElementById('hud') as HTMLDivElement;
 
@@ -79,6 +96,57 @@ async function main(): Promise<void> {
   gridOverlay.visible = false;
   world.addChild(gridOverlay);
 
+  // Grey circles running the stepped controller (SPEC §6.1).
+  const bodyLayer = new Graphics();
+  world.addChild(bodyLayer);
+  let collider = new CircleCollider(getMonkeyTune().colliderRadius);
+  const bodies: Body[] = [];
+  let selected = 0;
+  const input: CharacterInput = { move: 0, jump: false };
+
+  function spawnBodies(): void {
+    bodies.length = 0;
+    const spawns = validation.spawns;
+    const wanted = Math.min(6, spawns.length);
+    for (let i = 0; i < wanted; i++) {
+      // Spread them across the map rather than bunching at one end.
+      const spawn = spawns[Math.floor((i * spawns.length) / wanted)];
+      bodies.push(createBody(spawn.x, spawn.y - getMonkeyTune().colliderRadius));
+    }
+    selected = 0;
+  }
+  spawnBodies();
+
+  const simulation = new FixedLoop(STEP_SECONDS, (dt) => {
+    const physics = getPhysicsTune();
+    const monkeyTune = getMonkeyTune();
+    for (let i = 0; i < bodies.length; i++) {
+      stepCharacter(
+        bodies[i],
+        i === selected ? input : IDLE,
+        mask,
+        collider,
+        physics,
+        monkeyTune,
+        dt,
+      );
+    }
+  });
+
+  function drawBodies(): void {
+    bodyLayer.clear();
+    const radius = collider.radius;
+    for (let i = 0; i < bodies.length; i++) {
+      const body = bodies[i];
+      bodyLayer.circle(body.x, body.y, radius);
+      bodyLayer.fill({ color: i === selected ? 0xff2e63 : 0xb8c4d4, alpha: 0.92 });
+      if (!body.grounded) {
+        bodyLayer.circle(body.x, body.y, radius + 3);
+        bodyLayer.stroke({ width: 1.5, color: 0xffd23f, alpha: 0.7 });
+      }
+    }
+  }
+
   const frames = new Samples();
   const destruction = new Samples();
   const blits = new Samples();
@@ -105,6 +173,18 @@ async function main(): Promise<void> {
     const blitMs = performance.now() - t0;
     if (result.clearedTotal === 0) return;
     view.applyExplosion(result);
+    for (const body of bodies) {
+      const dx = body.x - x;
+      const dy = body.y - y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > radius * 3 || distance < 0.001) continue;
+      const falloff = 1 - distance / (radius * 3);
+      applyImpulse(
+        body,
+        (dx / distance) * DEMO_KNOCKBACK * falloff,
+        (dy / distance) * DEMO_KNOCKBACK * falloff,
+      );
+    }
     const upload = view.lastUpload;
     last = { ...result, blitMs };
     blits.push(blitMs);
@@ -142,6 +222,7 @@ async function main(): Promise<void> {
   async function reset(): Promise<void> {
     mask = (await loadTerrain()).mask;
     view.replaceMask(mask);
+    spawnBodies();
     destruction.clear();
     blits.clear();
     uploads.clear();
@@ -149,7 +230,34 @@ async function main(): Promise<void> {
     if (gridOverlay.visible) drawGrid();
   }
 
+  const held = new Set<string>();
+  function syncMove(): void {
+    const left = held.has('arrowleft') || held.has('a');
+    const right = held.has('arrowright') || held.has('d');
+    input.move = left === right ? 0 : right ? 1 : -1;
+  }
+  window.addEventListener('keyup', (event) => {
+    held.delete(event.key.toLowerCase());
+    syncMove();
+    if (event.key === ' ') input.jump = false;
+  });
+  window.addEventListener('blur', () => {
+    held.clear();
+    syncMove();
+    input.jump = false;
+  });
+
   window.addEventListener('keydown', (event) => {
+    const key = event.key.toLowerCase();
+    held.add(key);
+    syncMove();
+    if (key === ' ') {
+      input.jump = true;
+      event.preventDefault();
+    } else if (key === 'tab') {
+      selected = bodies.length === 0 ? 0 : (selected + 1) % bodies.length;
+      event.preventDefault();
+    }
     if (event.key === '1') radius = RADII[0];
     else if (event.key === '2') radius = RADII[1];
     else if (event.key === '3') radius = RADII[2];
@@ -161,6 +269,26 @@ async function main(): Promise<void> {
     }
   });
 
+  if (import.meta.env.DEV) {
+    const [{ mountTuneHarness }, { TUNE_SPECS }] = await Promise.all([
+      import('./tune/harness.js'),
+      import('./tune/registry.js'),
+    ]);
+    mountTuneHarness({
+      specs: TUNE_SPECS,
+      onChange(spec) {
+        // Anything derived from tuning has to be rebuilt when it moves.
+        if (spec.name === 'monkey') collider = new CircleCollider(getMonkeyTune().colliderRadius);
+        if (spec.name === 'terrain') {
+          const terrain = getTerrainTune();
+          view.setRimDepth(terrain.rim.depthPx);
+          view.rimStrength = terrain.rim.strength;
+          view.uploadAll();
+        }
+      },
+    });
+  }
+
   // Handle for the smoke test and for poking at things from the console.
   (globalThis as unknown as { banana: unknown }).banana = {
     app,
@@ -170,10 +298,24 @@ async function main(): Promise<void> {
     get mask() {
       return mask;
     },
+    get bodies() {
+      return bodies;
+    },
+    get physics() {
+      return getPhysicsTune();
+    },
+    get monkey() {
+      return getMonkeyTune();
+    },
+    step(frames = 1) {
+      for (let i = 0; i < frames; i++) simulation.advance(STEP_SECONDS * 1000);
+    },
   };
 
   app.ticker.add((ticker) => {
     frames.push(ticker.deltaMS);
+    simulation.advance(ticker.deltaMS);
+    drawBodies();
     if (stressLeft > 0) {
       stressLeft--;
       fire(rng() * width, height * 0.4 + rng() * height * 0.55);
@@ -190,6 +332,9 @@ async function main(): Promise<void> {
       `validate ${validation.ok ? 'ok' : 'FAILED'}  spawns ${validation.spawns.length}  islands ${validation.islandSpawns.length}`,
       `frame    p50 ${frames.percentile(0.5).toFixed(2)}ms  p99 ${frames.percentile(0.99).toFixed(2)}ms`,
       `radius   ${radius}px${stressLeft > 0 ? `   stress ${stressLeft} left` : ''}`,
+      bodies.length > 0
+        ? `body     ${selected + 1}/${bodies.length}  ${bodies[selected].grounded ? 'grounded' : 'airborne'}${bodies[selected].atRest ? ' · at rest' : ''}  r${collider.radius}`
+        : 'body     —',
       '',
       last
         ? `last     cleared ${last.clearedTotal}px  dirty ${last.dirtyRect.width}x${last.dirtyRect.height}  ${((view.lastUpload?.bytes ?? 0) / 1024).toFixed(1)}KB`

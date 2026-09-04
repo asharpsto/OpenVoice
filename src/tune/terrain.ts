@@ -109,10 +109,15 @@ export function parseTerrainTune(raw: TerrainTuneJson): TerrainTune {
 
 let cached: TerrainTune | undefined;
 
-/** The loaded terrain tuning. Stage 3 replaces the source with the hot-reload harness. */
+/** The loaded terrain tuning, hot-reloadable through the stage-3 harness. */
 export function getTerrainTune(): TerrainTune {
   cached ??= parseTerrainTune(terrainTuneJson as TerrainTuneJson);
   return cached;
+}
+
+/** Replaces the cached tuning. Used by the hot-reload harness. */
+export function setTerrainTune(tune: TerrainTune): void {
+  cached = tune;
 }
 
 /** Effective crater radius for one material (SPEC §5.3, §5.4). */

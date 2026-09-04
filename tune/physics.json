@@ -1,0 +1,13 @@
+{
+  "$comment": "Physics tuning. SPEC §6.1, §7. Pixels and seconds throughout.",
+  "gravity": 900,
+  "drag": 0.35,
+  "terminalVelocity": 1400,
+  "friction": 0.55,
+  "bounce": 0.22,
+  "maxStepHeight": 5,
+  "maxSnapDistance": 6,
+  "restSpeed": 14,
+  "restFrames": 8,
+  "maxSubStepPx": 1
+}

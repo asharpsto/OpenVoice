@@ -1,0 +1,11 @@
+{
+  "$comment": "Monkey tuning. SPEC §6.2, §7.",
+  "health": 100,
+  "colliderRadius": 12,
+  "walkSpeed": 95,
+  "jumpSpeed": 310,
+  "fallDamage": {
+    "thresholdSpeed": 430,
+    "perPixelPerSecond": 0.12
+  }
+}

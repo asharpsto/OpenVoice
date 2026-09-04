@@ -276,3 +276,94 @@ npm test              # 83 tests (63 terrain, 20 mask ops)
 npm run masktool      # the tool, at /tools/masktool/
 npm run smoke:masktool  # headless: seed, paint, fill, despeckle, export
 ```
+
+---
+
+## Stage 3 — Stepped controller + tuning harness (2026-09-04)
+
+Deliverable (SPEC §12, day 3): stepped character controller + tuning harness.
+Exit criteria: circle walks slopes, rests without jitter over 1000 frames, takes
+knockback; sliders live, write-back working.
+
+### Status: met
+
+- **102 tests pass**, including the 1000-frame rest test and the slope limit.
+- **Tuning verified against disk, not assumed**: `npm run smoke:tune` drives the
+  overlay in a browser and checks both directions — a slider changing
+  `tune/physics.json`, and an edit to that file reaching the running game.
+
+### Built
+
+```
+/src/physics
+  collider.ts    circle vs mask; broadphase reject, bottom-up row scan
+  body.ts        position, velocity, grounded, rest state, impact speed
+  controller.ts  the stepped controller (SPEC §6.1)
+/src/core/loop.ts    fixed timestep with a bounded catch-up
+/src/tune
+  physics.ts registry.ts harness.ts channel.ts monkey.ts
+/tools/vite-plugin-tune.ts   dev-server half: hot reload and write-back
+/tune/physics.json /tune/monkey.json
+/tests/controller.test.ts /tests/loop.test.ts
+/tools/smoke/tune-smoke.ts
+```
+
+### Decisions
+
+- **Grounded and airborne are different code paths, deliberately.** A grounded
+  body walks (stepped, a pixel at a time) and then settles; it never integrates.
+  That is what makes a standing body perfectly still — there is no arithmetic
+  running that could drift it. The 1000-frame test asserts exact equality on
+  both axes, not a tolerance.
+- **Airborne collision response is axis-separated.** Reflect along the blocked
+  axis, take friction off the other. No normal is sampled anywhere in the file,
+  because a sampled normal is what makes bitmap controllers jitter (SPEC §6.1)
+  — there is deliberately no code here that could do it even by accident.
+- **Unsticking is bounded at two diameters.** A spawn puts a body's centre on
+  the surface pixel, so half of it starts buried; that plus a pixel of overlap
+  from a landing is the realistic range. A body inside a slab thicker than that
+  is left exactly where it is rather than teleported somewhere arbitrary — the
+  turn machine resolves that case (SPEC §6.6), and an unbounded search would
+  cost a column scan every frame.
+- **Hot reload must not reload the page.** Vite's default for a changed JSON
+  module is a full reload, which throws away the match you were tuning against
+  — most of the value of tuning live. The plugin claims the update via
+  `handleHotUpdate` and pushes new values over its own channel instead. The
+  smoke test plants a sentinel on `window` and fails if it disappears.
+- **A slider can never leave unloadable tuning behind.** Every change is parsed
+  before it is applied and before it is written; a value that fails validation
+  is rolled back in the UI and reported, not applied. `maxSubStepPx` of 0 is
+  the test case — it would make a projectile loop forever.
+- **Slider ranges live in `registry.ts`, not the JSON.** They are UI metadata;
+  §7 says the JSON holds values.
+
+### What broke on the way
+
+- **The overlay pulled `node:fs` into the browser.** The harness imported its
+  channel constants from the Vite plugin, which imports `node:fs/promises` and
+  `vite`. The whole page failed to start. Constants now live in
+  `src/tune/channel.ts`, which both halves import.
+- **Hot-reloaded values that are not on a slider's step grid.** A hand-edited
+  `gravity: 777` snaps the slider thumb to 780. The live tuning and the numeric
+  readout both stay 777, which is the correct behaviour — the thumb is the only
+  thing that rounds — but it is worth knowing before someone reads a position
+  off the panel and believes it.
+
+### Notes
+
+- Knockback in the dev harness is a placeholder radial impulse. The real curves
+  — damage and knockback falling off **independently**, which is non-negotiable
+  (SPEC §6.3) — are `weapon.json` and arrive with the bazooka in stage 4.
+- `/src/feedback` (the Hardwicke module, §0.1) is still unbuilt. I have no
+  access to a Hardwicke repository from this session to check whether the
+  tuning harness already exists there, so it was written here, with the generic
+  half (`harness.ts`, `channel.ts`, the Vite plugin) separated from the
+  Banana-specific half (`registry.ts`) so it can be copied across.
+
+### Running it
+
+```
+npm test              # 102 tests
+npm run smoke:tune    # sliders live, write-back and hot reload against disk
+npm run dev           # [←/→] walk · [space] jump · [tab] next body · [t] tuning
+```
