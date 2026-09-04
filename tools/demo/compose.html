@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8" /><style>
+  html,body{margin:0;background:#0b0e13;color:#e8eef5;font:14px/1.4 ui-monospace,Menlo,monospace}
+  #grid{display:grid;grid-template-columns:1fr 1fr;gap:2px;width:1640px}
+  figure{margin:0;position:relative;background:#0b0e13}
+  img{display:block;width:100%}
+  figcaption{position:absolute;left:0;top:0;padding:9px 13px;background:rgba(11,14,19,.9);
+    border-right:1px solid #2a3446;border-bottom:1px solid #2a3446}
+  b{color:#ff2e63;margin-right:9px}
+  span{color:#93a3b8}
+</style></head><body>
+<div id="grid">
+  <figure><img src="./out/photo.png" /><figcaption><b>1</b>The photograph <span>— a JPEG, nothing more</span></figcaption></figure>
+  <figure><img src="./out/overlay.png" /><figcaption><b>2</b>The painted mask <span>— one byte per pixel</span></figcaption></figure>
+  <figure><img src="./out/ingame.png" /><figcaption><b>3</b>In the game <span>— sky is not drawn, and is not solid</span></figcaption></figure>
+  <figure><img src="./out/destroyed.png" /><figcaption><b>4</b>After six shots <span>— the mask is the collision</span></figcaption></figure>
+</div>
+</body></html>
