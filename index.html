@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Project Banana — terrain harness</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: #0e1116; overflow: hidden; }
+      body { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eef5; }
+      canvas { display: block; touch-action: none; }
+      #hud {
+        position: fixed; top: 8px; left: 8px; padding: 10px 12px;
+        background: rgba(10, 13, 18, 0.82); border: 1px solid #263041; border-radius: 6px;
+        white-space: pre; pointer-events: none; max-width: calc(100vw - 16px);
+      }
+      #hud b { color: #ff2e63; font-weight: 600; }
+      #hud .ok { color: #8ee06a; }
+      #hud .over { color: #ff2e63; }
+      #help {
+        position: fixed; bottom: 8px; left: 8px; padding: 8px 12px;
+        background: rgba(10, 13, 18, 0.82); border: 1px solid #263041; border-radius: 6px;
+        white-space: pre; pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">booting…</div>
+    <div id="help">tap terrain to fire · [1/2/3] radius · [s] stress 200 · [r] reset · [g] grid</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

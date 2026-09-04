@@ -1,0 +1,31 @@
+{
+  "name": "project-banana",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Turn-based 2D artillery game with destructible terrain from photographs.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench": "vitest bench --run",
+    "bake": "tsx pipeline/bake.ts",
+    "bench:blit": "tsx bench/blit.ts",
+    "smoke": "tsx tools/smoke/render-smoke.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pngjs": "^6.0.5",
+    "playwright-core": "^1.62.1",
+    "pngjs": "^7.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "pixi.js": "^8.6.6"
+  }
+}

@@ -11,3 +11,10 @@ examples*
 build
 *.egg-info/
 *.zip
+
+# Project Banana
+node_modules/
+dist/
+public/maps/
+tools/smoke/out/
+maps/

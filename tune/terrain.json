@@ -1,0 +1,27 @@
+{
+  "$comment": "Terrain tuning. SPEC §7. Hot-reloaded with sliders from stage 3 onward.",
+  "blastResistance": {
+    "building": 2.4,
+    "ground": 1.0,
+    "vegetation": 0.45,
+    "vehicle": 0.55,
+    "pole": 0.4
+  },
+  "rim": {
+    "depthPx": 4,
+    "strength": 0.6
+  },
+  "query": {
+    "raycastStepPx": 0.25
+  },
+  "validation": {
+    "minSolidFraction": 0.25,
+    "maxSolidFraction": 0.75,
+    "minSpawnPoints": 8,
+    "spawnWidthPx": 14,
+    "spawnClearanceHeightPx": 28,
+    "spawnFlatnessTolerancePx": 3,
+    "spawnSpacingPx": 40,
+    "spawnGroundDepthPx": 6
+  }
+}
