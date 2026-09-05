@@ -1,0 +1,9 @@
+{
+  "$comment": "Turn machine. SPEC §6.6, §7.",
+  "moveSeconds": 30,
+  "settleTimeoutSeconds": 8,
+  "suddenDeathRound": 12,
+  "waterRisePerRound": 14,
+  "teamSize": 3,
+  "retreatSeconds": 3
+}

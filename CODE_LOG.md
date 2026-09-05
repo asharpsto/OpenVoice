@@ -464,3 +464,91 @@ satisfying?** Not whether it looks good — it deliberately does not.
 **One thing to undo later:** the slider overlay is currently mounted in
 production builds too (disable with `?notune`). That was the right trade while
 the only builds are playtests, but a shipping build must exclude it.
+
+---
+
+## Stage 5 — Turn machine, teams, win conditions (2026-09-05)
+
+Deliverable (SPEC §12, day 5): turn system, teams, win conditions, sudden death.
+Exit criteria: every §6.6 edge case tested and passing.
+
+### Status: met
+
+**129 tests pass.** All ten §6.6 edge cases have a test, plus the three §10
+invariants. Three full matches run to a result in a browser with no hangs and
+**zero settle timeouts** (`npm run smoke:match`).
+
+### Built
+
+```
+/src/turn/match.ts     teams, health, death causes, the win check
+/src/turn/machine.ts   the state machine
+/src/weapon/chain.ts   vehicle chain reactions
+/tune/turn.json
+/tests/turn.test.ts    16 tests
+/tools/smoke/match-smoke.ts
+```
+
+### Decisions
+
+- **Deaths queue and resolve together, then the win check runs once.** Two
+  monkeys dying in one explosion must not produce two win checks — that is how
+  a draw gets mis-called as a win for whoever was removed second.
+- **A chain resolves entirely inside one RESOLUTION.** The machine never sees a
+  half-finished chain, for the same reason.
+- **Firing ends the move phase immediately**, so the timer cannot cut a shot
+  short. The §6.6 edge case is really "a shot fired at 29.9s still resolves",
+  and the test asserts the blast happens rather than watching a clock.
+- **Chains terminate on their own**: each step destroys vehicle pixels and the
+  mask only empties. `maxDepth` is belt-and-braces, and when it trips it is
+  logged rather than silently swallowed.
+- **Settle timeout force-freezes and advances**, and records an event. §8 wants
+  these counted because a non-zero rate means `restSpeed` is wrong, not that
+  the timeout is doing its job.
+- **The AI can play both sides** (`[k]` cycles off / team B / both). Watching a
+  match play itself is the only way to see one end to end without a second
+  person, which is the reason the AI was pulled forward to day 4 at all.
+
+### What broke on the way
+
+Three of the edge case tests failed first time, and all three were my fixtures
+rather than the machine — worth recording because two of them taught me
+something about the game:
+
+- A monkey blasted off a ledge died `offMap`, not `water`, because the blast
+  flung it sideways off a 900px map before it could fall. The drowning fixture
+  now uses a wide map and a perch narrower than one blast radius.
+- A "hit the far monkey" test put the target 740px away. **The bazooka reaches
+  about 498px at full power** — see below. Tests now solve the shot with the
+  AI's own aim solver rather than a hand-picked angle, so they fail for the
+  reason they are named for.
+
+### Two findings for gate 2
+
+**Range.** Measured flat range at `gravity: 900`:
+
+| power | range |
+|---|---|
+| 180 (min) | 36px |
+| 400 | 167px |
+| 560 | 314px |
+| 720 (max) | **498px** |
+
+The stand-in map is 1600px wide and a baked photo can be 2048px, so at full
+power you cover about a third of the map. That may be the right feel — you walk
+to get in range, positioning matters — but nobody decided it, it fell out of
+`muzzleVelocity.max` and `gravity`. Left alone deliberately: it is a feel value
+on a slider, and gate 1 was signed off with it as it stands.
+
+**Match length.** With the AI playing both sides on the stand-in map: 31, 57
+and 47 rounds, which at six monkeys is 190–340 turns. Sudden death starts at
+round 12 and is doing a lot of the work. Gate 2 asks whether a match is
+interesting, and "long" is the first thing to look at — `moveSeconds`,
+`damage.max` and `suddenDeathRound` are the dials.
+
+### Not done
+
+- **Camera** — stage 6, next. The map is still fitted to the window, so on a
+  phone a 1600px map is drawn small and craters are hard to read.
+- Retreat time after firing exists (`retreatSeconds`) but there is no camera to
+  follow the shot with yet.

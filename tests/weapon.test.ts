@@ -46,6 +46,7 @@ function weaponFixture(overrides: Partial<WeaponTune> = {}): WeaponTune {
     blastRadius: 78,
     damage: { max: 52, radius: 92, falloffPower: 1.7 },
     knockback: { max: 620, radius: 150, falloffPower: 0.85 },
+    chain: { minVehiclePixels: 30, radiusScale: 0.75, maxDepth: 6, searchPad: 26 },
     selfPropelGapMin: 120,
     shake: { max: 26, radius: 420 },
     ...overrides,

@@ -4,7 +4,7 @@ Turn-based 2D artillery game. Destructible terrain from photographs. Monkeys, on
 
 Full spec: `SPEC.md`. Read the relevant section before implementing anything.
 
-**Current stage: 4** — stages 1 and 3 complete; stage 2's maps need photographs. See `CODE_LOG.md`.
+**Current stage: 6** — stages 1, 3, 4, 5 complete; gate 1 signed off. Stage 2's maps need photographs. See `CODE_LOG.md`.
 
 ---
 

@@ -2,6 +2,7 @@ import terrainRaw from '../../tune/terrain.json';
 import weaponRaw from '../../tune/weapon.json';
 import windRaw from '../../tune/wind.json';
 import aiRaw from '../../tune/ai.json';
+import turnRaw from '../../tune/turn.json';
 import physicsRaw from '../../tune/physics.json';
 import monkeyRaw from '../../tune/monkey.json';
 import { parseTerrainTune, setTerrainTune, type TerrainTuneJson } from './terrain.js';
@@ -10,6 +11,7 @@ import { parseMonkeyTune, setMonkeyTune, type MonkeyTune } from './monkey.js';
 import { parseWeaponTune, setWeaponTune, type WeaponTune } from './weapon.js';
 import { parseWindTune, setWindTune } from './wind.js';
 import { parseAiTune, setAiTune } from './ai.js';
+import { parseTurnTune, setTurnTune, type TurnTune } from './turn.js';
 import type { AiTune } from '../ai/aim.js';
 import type { WindTune } from '../wind/wind.js';
 
@@ -167,8 +169,23 @@ const ai: TuneSpec = {
   },
 };
 
-/** Every tunable file. `turn.json` joins with the turn machine in stage 5. */
-export const TUNE_SPECS: TuneSpec[] = [terrain, physics, monkey, weapon, wind, ai];
+const turn: TuneSpec = {
+  name: 'turn',
+  raw: copy(turnRaw) as unknown as Record<string, unknown>,
+  fields: [
+    { path: 'moveSeconds', min: 5, max: 120, step: 1 },
+    { path: 'settleTimeoutSeconds', min: 1, max: 30, step: 1 },
+    { path: 'retreatSeconds', min: 0, max: 10, step: 0.5 },
+    { path: 'suddenDeathRound', min: 1, max: 40, step: 1 },
+    { path: 'waterRisePerRound', min: 0, max: 80, step: 2 },
+  ],
+  apply() {
+    setTurnTune(parseTurnTune(this.raw as unknown as TurnTune));
+  },
+};
+
+/** Every tunable file. */
+export const TUNE_SPECS: TuneSpec[] = [terrain, physics, monkey, weapon, wind, ai, turn];
 
 export function specByName(name: string): TuneSpec | undefined {
   return TUNE_SPECS.find((spec) => spec.name === name);

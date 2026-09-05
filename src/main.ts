@@ -3,15 +3,18 @@ import { FixedLoop } from './core/loop.js';
 import { mulberry32 } from './core/rng.js';
 import { createBody, type Body } from './physics/body.js';
 import { addAimError, nearestTarget, solveAim } from './ai/aim.js';
-import { applyBlast, shakeAt } from './weapon/explosion.js';
-import { launch, previewArc, stepProjectile, type Projectile } from './weapon/projectile.js';
-import { createWind, nextWind, windFraction, type Wind } from './wind/wind.js';
+import { shakeAt } from './weapon/explosion.js';
+import { previewArc } from './weapon/projectile.js';
+import { createWind, windFraction } from './wind/wind.js';
 import { getAiTune } from './tune/ai.js';
 import { getWeaponTune } from './tune/weapon.js';
 import { getWindTune } from './tune/wind.js';
-import { fallDamageFor } from './tune/monkey.js';
+import { getTurnTune } from './tune/turn.js';
+import { TurnMachine, type TurnTunes } from './turn/machine.js';
+import { TEAM_NAMES, type Match, type Monkey, type TeamId } from './turn/match.js';
+
 import { CircleCollider } from './physics/collider.js';
-import { IDLE, stepCharacter, type CharacterInput } from './physics/controller.js';
+import type { CharacterInput } from './physics/controller.js';
 import { buildStreetScene } from './dev/streetScene.js';
 import { explode, type ExplosionResult } from './terrain/destroy.js';
 import { loadMap } from './terrain/load.js';
@@ -109,50 +112,63 @@ async function main(): Promise<void> {
   gridOverlay.visible = false;
   world.addChild(gridOverlay);
 
-  // Grey circles running the stepped controller (SPEC §6.1).
+  // A real match now: two teams, a turn machine, win conditions (SPEC §6.6).
   const bodyLayer = new Graphics();
   world.addChild(bodyLayer);
-  let collider = new CircleCollider(getMonkeyTune().colliderRadius);
-  const bodies: Body[] = [];
-  let selected = 0;
-  const input: CharacterInput = { move: 0, jump: false };
-
-  function spawnBodies(): void {
-    bodies.length = 0;
-    // Spread across the map but inset from both ends, so nobody starts with
-    // half of themselves off the edge of the screen.
-    const spawns = validation.spawns;
-    const wanted = Math.min(6, spawns.length);
-    const usable = spawns.filter(
-      (spawn) => spawn.x > width * 0.06 && spawn.x < width * 0.94,
-    );
-    const pool = usable.length >= wanted ? usable : spawns;
-    for (let i = 0; i < wanted; i++) {
-      const spawn = pool[Math.floor(((i + 0.5) * pool.length) / wanted)];
-      bodies.push(createBody(spawn.x, spawn.y - getMonkeyTune().colliderRadius));
-    }
-    selected = 0;
-  }
-  spawnBodies();
-
-  const health: number[] = [];
-  function spawnHealth(): void {
-    health.length = 0;
-    for (let i = 0; i < bodies.length; i++) health.push(getMonkeyTune().health);
-  }
-  spawnHealth();
-
   const aimLayer = new Graphics();
   world.addChild(aimLayer);
-  const rng = mulberry32(20260904);
-  let wind: Wind = createWind(rng, getWindTune());
+
+  let collider = new CircleCollider(getMonkeyTune().colliderRadius);
+  const input: CharacterInput = { move: 0, jump: false };
+  const rng = mulberry32(20260905);
   let scheme: AimScheme = 'drag';
   let aimAngle = -Math.PI / 4;
   let aimPower = 0.6;
   let aiming = false;
-  let projectile: Projectile | null = null;
   let shake = 0;
   let lastShot = '';
+  /**
+   * Who the AI plays. 'both' lets a match play itself, which is how you watch
+   * one end to end without a second person — the reason the AI exists at all
+   * (SPEC §6.4).
+   */
+  let autoAi: 'off' | 'teamB' | 'both' = 'teamB';
+
+  function currentTunes(): TurnTunes {
+    return {
+      turn: getTurnTune(),
+      physics: getPhysicsTune(),
+      monkey: getMonkeyTune(),
+      weapon: getWeaponTune(),
+      terrain: getTerrainTune(),
+      wind: getWindTune(),
+    };
+  }
+
+  /** Alternating spawns so the teams start interleaved rather than in blocks. */
+  function buildMatch(): Match {
+    const turnTune = getTurnTune();
+    const radius = getMonkeyTune().colliderRadius;
+    const usable = validation.spawns.filter((s) => s.x > width * 0.06 && s.x < width * 0.94);
+    const pool = usable.length >= turnTune.teamSize * 2 ? usable : validation.spawns;
+    const wanted = Math.min(turnTune.teamSize * 2, pool.length);
+    const monkeys: Monkey[] = [];
+    for (let i = 0; i < wanted; i++) {
+      const spawn = pool[Math.floor(((i + 0.5) * pool.length) / wanted)];
+      monkeys.push({
+        id: i,
+        team: (i % 2) as TeamId,
+        body: createBody(spawn.x, spawn.y - radius),
+        health: getMonkeyTune().health,
+        alive: true,
+        cause: null,
+      });
+    }
+    return { monkeys, waterLineY: source.waterLineY, round: 0, active: -1, turnTeam: 0 };
+  }
+
+  let match = buildMatch();
+  let turn = new TurnMachine(match, mask, currentTunes(), rng, createWind(rng, getWindTune()));
 
   function power(): number {
     const weapon = getWeaponTune();
@@ -168,133 +184,131 @@ async function main(): Promise<void> {
   }
 
   function fireBanana(): void {
-    const body = bodies[selected];
-    if (!body || projectile) return;
-    const start = muzzle(body);
-    projectile = launch(start.x, start.y, aimAngle, power());
-    aiming = false;
-  }
-
-  function detonate(x: number, y: number): void {
-    const weapon = getWeaponTune();
-    const terrain = getTerrainTune();
-    const monkeyTune = getMonkeyTune();
-    const result = explode(mask, x, y, weapon.blastRadius, terrain);
-    if (result.clearedTotal > 0) view.applyExplosion(result);
-
-    let worst = '';
-    for (const effect of applyBlast(bodies, x, y, weapon)) {
-      health[effect.index] -= effect.damage;
-      if (effect.index === selected && effect.damage > 0) {
-        worst = `self-damage ${effect.damage.toFixed(0)}`;
-      }
+    if (turn.fire({ angle: aimAngle, power: power() })) {
+      aiming = false;
+      lastShot = `team ${TEAM_NAMES[match.turnTeam]} fired`;
     }
-    const distance = bodies[selected] ? Math.hypot(bodies[selected].x - x, bodies[selected].y - y) : 0;
-    shake = Math.max(shake, shakeAt(distance, weapon.shake.max, weapon.shake.radius));
-    lastShot = `hit at ${x.toFixed(0)},${y.toFixed(0)}${worst ? ` · ${worst}` : ''}`;
-    void monkeyTune;
-    // Wind changes each turn; firing ends the turn in the real machine (stage 5).
-    wind = nextWind(wind, rng, getWindTune());
   }
 
+  /** The dumb AI takes the shot for whoever is up (SPEC §6.4). */
   function aiTurn(): void {
+    const shooter = turn.activeMonkey;
+    if (!shooter || (turn.phase !== 'MOVE' && turn.phase !== 'AIM')) return;
     const weapon = getWeaponTune();
     const ai = getAiTune();
-    const shooter = bodies[selected];
-    if (!shooter || projectile) return;
-    const enemies = bodies.filter((_, i) => i !== selected && health[i] > 0);
+    const enemies = match.monkeys.filter((m) => m.alive && m.team !== shooter.team);
     if (enemies.length === 0) return;
-    const target = enemies[nearestTarget(shooter.x, shooter.y, enemies)];
+    const target = enemies[nearestTarget(shooter.body.x, shooter.body.y, enemies.map((m) => m.body))];
+    const shotPower = weapon.muzzleVelocity.max * 0.9;
     const solution = solveAim(
-      shooter.x, shooter.y, target.x, target.y,
-      weapon.muzzleVelocity.max * 0.85,
-      getPhysicsTune().gravity, wind.x, weapon.projectile, ai.searchAngles,
+      shooter.body.x, shooter.body.y, target.body.x, target.body.y, shotPower,
+      getPhysicsTune().gravity, turn.wind.x, weapon.projectile, ai.searchAngles,
     );
     const shot = addAimError(solution, rng, ai.aimErrorSigma);
     aimAngle = shot.angle;
     aimPower =
       (shot.power - weapon.muzzleVelocity.min) /
       (weapon.muzzleVelocity.max - weapon.muzzleVelocity.min);
-    lastShot = `AI aims, miss estimate ${solution.missDistance.toFixed(0)}px`;
-    fireBanana();
+    lastShot = `AI: miss estimate ${solution.missDistance.toFixed(0)}px`;
+    turn.fire({ angle: shot.angle, power: shot.power });
+  }
+
+  function newMatch(): void {
+    match = buildMatch();
+    turn = new TurnMachine(match, mask, currentTunes(), rng, createWind(rng, getWindTune()));
+    lastShot = '';
   }
 
   const simulation = new FixedLoop(STEP_SECONDS, (dt) => {
-    const physics = getPhysicsTune();
-    const monkeyTune = getMonkeyTune();
-    const weapon = getWeaponTune();
-    const terrain = getTerrainTune();
+    turn.step(dt, input);
 
-    if (projectile) {
-      const step = stepProjectile(
-        projectile, dt, mask, physics.gravity, wind.x, weapon.projectile, terrain.query.raycastStepPx,
-      );
-      if (step.hit) {
-        detonate(projectile.x, projectile.y);
-        projectile = null;
-      } else if (step.offMap || projectile.age > 12) {
-        lastShot = 'off the map';
-        projectile = null;
-        wind = nextWind(wind, rng, getWindTune());
+    // Craters from this turn's blasts, including anything they chained into.
+    if (turn.pendingBlasts.length > 0) {
+      for (const blast of turn.pendingBlasts) {
+        view.applyExplosion(blast.result);
+        const active = turn.activeMonkey;
+        if (active) {
+          const distance = Math.hypot(active.body.x - blast.x, active.body.y - blast.y);
+          const weapon = getWeaponTune();
+          shake = Math.max(shake, shakeAt(distance, weapon.shake.max, weapon.shake.radius));
+        }
       }
+      turn.pendingBlasts = [];
     }
 
-    for (let i = 0; i < bodies.length; i++) {
-      const wasAirborne = !bodies[i].grounded;
-      stepCharacter(bodies[i], i === selected ? input : IDLE, mask, collider, physics, monkeyTune, dt);
-      if (wasAirborne && bodies[i].grounded && bodies[i].lastImpactSpeed > 0) {
-        health[i] -= fallDamageFor(bodies[i].lastImpactSpeed, monkeyTune);
-        bodies[i].lastImpactSpeed = 0;
-      }
-      // Water at the bottom of the map is instant death (SPEC §6.2).
-      if (bodies[i].y > mask.height) health[i] = 0;
+    // Team B is the house side while there is nobody to pass the phone to.
+    const aiPlaysThisTurn = autoAi === 'both' || (autoAi === 'teamB' && match.turnTeam === 1);
+    if (aiPlaysThisTurn && (turn.phase === 'MOVE' || turn.phase === 'AIM')) {
+      if (turn.timer < getTurnTune().moveSeconds - 0.8) aiTurn();
     }
     shake *= 0.88;
   });
 
+  /** Teams by accessory colour, active marker in the reserved accent (§11.2). */
+  const TEAM_COLOUR = [0x00e5ff, 0xb14eff];
+
   function drawBodies(): void {
     bodyLayer.clear();
     const radius = collider.radius;
-    for (let i = 0; i < bodies.length; i++) {
-      const body = bodies[i];
-      if (health[i] <= 0) continue;
+    const active = turn.activeMonkey;
+    for (const monkey of match.monkeys) {
+      if (!monkey.alive) continue;
+      const body = monkey.body;
       bodyLayer.circle(body.x, body.y, radius);
-      bodyLayer.fill({ color: i === selected ? 0xff2e63 : 0xb8c4d4, alpha: 0.92 });
-      // Health bar in the reserved UI accent (SPEC §11.2).
-      const ratio = Math.max(0, health[i]) / getMonkeyTune().health;
-      bodyLayer.rect(body.x - radius, body.y - radius - 9, radius * 2, 3);
+      bodyLayer.fill({ color: 0xb8c4d4, alpha: 0.94 });
+      // Accessory, not a full-body tint: a tint gets lost against green and
+      // grey, which is a legibility problem rather than a cosmetic one (§6.2).
+      bodyLayer.circle(body.x, body.y - radius * 0.55, radius * 0.5);
+      bodyLayer.fill({ color: TEAM_COLOUR[monkey.team] });
+      const ratio = Math.max(0, monkey.health) / getMonkeyTune().health;
+      bodyLayer.rect(body.x - radius, body.y - radius - 10, radius * 2, 3);
       bodyLayer.fill({ color: 0x0e1116, alpha: 0.75 });
-      bodyLayer.rect(body.x - radius, body.y - radius - 9, radius * 2 * ratio, 3);
+      bodyLayer.rect(body.x - radius, body.y - radius - 10, radius * 2 * ratio, 3);
       bodyLayer.fill({ color: 0xff2e63 });
+      if (monkey === active) {
+        bodyLayer.moveTo(body.x, body.y - radius - 20);
+        bodyLayer.lineTo(body.x - 5, body.y - radius - 28);
+        bodyLayer.lineTo(body.x + 5, body.y - radius - 28);
+        bodyLayer.fill({ color: 0xff2e63 });
+      }
     }
+  }
+
+  /** Water, which rises during sudden death (SPEC §6.6). */
+  function drawWater(): void {
+    if (match.waterLineY >= height) return;
+    bodyLayer.rect(0, match.waterLineY, width, height - match.waterLineY);
+    bodyLayer.fill({ color: 0x1b3a57, alpha: 0.55 });
   }
 
   /** Dotted arc including wind, fading with distance so it hints, not solves. */
   function drawAim(): void {
     aimLayer.clear();
-    const body = bodies[selected];
-
+    const projectile = turn.projectile;
     if (projectile) {
       aimLayer.circle(projectile.x, projectile.y, 5);
       aimLayer.fill({ color: 0xffd23f });
       return;
     }
-    if (!body || health[selected] <= 0) return;
+    const active = turn.activeMonkey;
+    if (!active || (turn.phase !== 'MOVE' && turn.phase !== 'AIM')) return;
 
     const weapon = getWeaponTune();
-    const start = muzzle(body);
+    const start = muzzle(active.body);
     const arc = previewArc(
       start.x, start.y, aimAngle, power(), mask,
-      getPhysicsTune().gravity, wind.x, weapon.projectile, PREVIEW,
+      getPhysicsTune().gravity, turn.wind.x, weapon.projectile, PREVIEW,
     );
     for (let i = 0; i < arc.length; i++) {
       const fade = 1 - i / arc.length;
       aimLayer.circle(arc[i].x, arc[i].y, 2.4);
       aimLayer.fill({ color: 0xff2e63, alpha: 0.15 + fade * 0.75 });
     }
-    // Power as a stub from the muzzle, so the drag length is readable.
-    aimLayer.moveTo(body.x, body.y);
-    aimLayer.lineTo(start.x + Math.cos(aimAngle) * 26 * aimPower, start.y + Math.sin(aimAngle) * 26 * aimPower);
+    aimLayer.moveTo(active.body.x, active.body.y);
+    aimLayer.lineTo(
+      start.x + Math.cos(aimAngle) * 26 * aimPower,
+      start.y + Math.sin(aimAngle) * 26 * aimPower,
+    );
     aimLayer.stroke({ width: 2, color: 0xff2e63, alpha: 0.9 });
   }
 
@@ -323,9 +337,6 @@ async function main(): Promise<void> {
     const blitMs = performance.now() - t0;
     if (result.clearedTotal === 0) return;
     view.applyExplosion(result);
-    for (const effect of applyBlast(bodies, x, y, getWeaponTune())) {
-      health[effect.index] -= effect.damage;
-    }
     const upload = view.lastUpload;
     last = { ...result, blitMs };
     blits.push(blitMs);
@@ -368,11 +379,11 @@ async function main(): Promise<void> {
       }
       return;
     }
-    const body = bodies[selected];
-    if (!body) return;
+    const active = turn.activeMonkey;
+    if (!active) return;
     const local = toWorld(event);
     aiming = true;
-    setAimFrom(local.x - body.x, local.y - body.y, 190);
+    setAimFrom(local.x - active.body.x, local.y - active.body.y, 190);
   });
 
   app.canvas.addEventListener('pointermove', (event: PointerEvent) => {
@@ -383,10 +394,10 @@ async function main(): Promise<void> {
       setAimFrom(event.clientX - bounds.left - centre.x, event.clientY - bounds.top - centre.y, WIDGET.radius);
       return;
     }
-    const body = bodies[selected];
-    if (!body) return;
+    const active = turn.activeMonkey;
+    if (!active) return;
     const local = toWorld(event);
-    setAimFrom(local.x - body.x, local.y - body.y, 190);
+    setAimFrom(local.x - active.body.x, local.y - active.body.y, 190);
   });
 
   app.canvas.addEventListener('pointerup', () => {
@@ -414,8 +425,7 @@ async function main(): Promise<void> {
   async function reset(): Promise<void> {
     mask = (await loadTerrain()).mask;
     view.replaceMask(mask);
-    spawnBodies();
-    spawnHealth();
+    newMatch();
     destruction.clear();
     blits.clear();
     uploads.clear();
@@ -453,11 +463,10 @@ async function main(): Promise<void> {
       aiTurn();
     } else if (key === 'm') {
       scheme = scheme === 'drag' ? 'widget' : 'drag';
-    } else if (key === 'w') {
-      wind = nextWind(wind, rng, getWindTune());
-    } else if (key === 'tab') {
-      selected = bodies.length === 0 ? 0 : (selected + 1) % bodies.length;
-      event.preventDefault();
+    } else if (key === 'n') {
+      newMatch();
+    } else if (key === 'k') {
+      autoAi = autoAi === 'off' ? 'teamB' : autoAi === 'teamB' ? 'both' : 'off';
     }
     if (event.key === '1') radius = RADII[0];
     else if (event.key === '2') radius = RADII[1];
@@ -506,8 +515,14 @@ async function main(): Promise<void> {
     get mask() {
       return mask;
     },
-    get bodies() {
-      return bodies;
+    get match() {
+      return match;
+    },
+    get turn() {
+      return turn;
+    },
+    setAi(mode: 'off' | 'teamB' | 'both') {
+      autoAi = mode;
     },
     get physics() {
       return getPhysicsTune();
@@ -524,6 +539,7 @@ async function main(): Promise<void> {
     frames.push(ticker.deltaMS);
     simulation.advance(ticker.deltaMS);
     drawBodies();
+    drawWater();
     drawAim();
     if (shake > 0.4) {
       world.position.set(
@@ -549,10 +565,14 @@ async function main(): Promise<void> {
       `validate ${validation.ok ? 'ok' : 'FAILED'}  spawns ${validation.spawns.length}  islands ${validation.islandSpawns.length}`,
       `frame    p50 ${frames.percentile(0.5).toFixed(2)}ms  p99 ${frames.percentile(0.99).toFixed(2)}ms`,
       `radius   ${radius}px${stressLeft > 0 ? `   stress ${stressLeft} left` : ''}`,
-      bodies.length > 0
-        ? `body     ${selected + 1}/${bodies.length}  hp ${Math.max(0, health[selected]).toFixed(0)}  ${bodies[selected].grounded ? 'grounded' : 'airborne'}${bodies[selected].atRest ? ' · at rest' : ''}`
-        : 'body     —',
-      `wind     ${wind.x < 0 ? '<<' : '>>'} ${Math.abs(wind.x).toFixed(0)}  (${(windFraction(wind, getWindTune()) * 100).toFixed(0)}%)`,
+      turn.phase === 'MATCH_OVER'
+        ? `MATCH    ${turn.outcome.winner === null ? 'a draw' : `team ${TEAM_NAMES[turn.outcome.winner]} wins`}   [n] new match`
+        : `turn     team ${TEAM_NAMES[match.turnTeam]}  ${turn.phase}  ${Math.max(0, turn.timer).toFixed(0)}s  round ${match.round}`,
+      turn.activeMonkey
+        ? `monkey   #${turn.activeMonkey.id}  hp ${Math.max(0, turn.activeMonkey.health).toFixed(0)}  ${turn.activeMonkey.body.grounded ? 'grounded' : 'airborne'}`
+        : 'monkey   —',
+      `alive    A ${match.monkeys.filter((m) => m.alive && m.team === 0).length}  ·  B ${match.monkeys.filter((m) => m.alive && m.team === 1).length}  ·  AI ${autoAi} [k]`,
+      `wind     ${turn.wind.x < 0 ? '<<' : '>>'} ${Math.abs(turn.wind.x).toFixed(0)}  (${(windFraction(turn.wind, getWindTune()) * 100).toFixed(0)}%)`,
       `aim      ${scheme}  ${((-aimAngle * 180) / Math.PI).toFixed(0)}°  power ${(aimPower * 100).toFixed(0)}%`,
       `shot     ${lastShot || '—'}`,
       '',

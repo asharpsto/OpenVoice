@@ -16,7 +16,8 @@
     "smoke": "tsx tools/smoke/render-smoke.ts",
     "smoke:masktool": "tsx tools/smoke/masktool-smoke.ts",
     "masktool": "vite",
-    "smoke:tune": "tsx tools/smoke/tune-smoke.ts"
+    "smoke:tune": "tsx tools/smoke/tune-smoke.ts",
+    "smoke:match": "tsx tools/smoke/match-smoke.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

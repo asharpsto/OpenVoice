@@ -18,6 +18,12 @@
     "radius": 150,
     "falloffPower": 0.85
   },
+  "chain": {
+    "minVehiclePixels": 30,
+    "radiusScale": 0.75,
+    "maxDepth": 6,
+    "searchPad": 26
+  },
   "selfPropelGapMin": 120,
   "shake": {
     "max": 26,

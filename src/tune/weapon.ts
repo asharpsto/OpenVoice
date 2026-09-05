@@ -17,6 +17,17 @@ export interface WeaponTune {
    * disconnected chunk — so it is not purely a feel value, it is a hard
    * requirement against stalemates, and `tests/weapon.test.ts` pins it.
    */
+  /** Vehicle chain reactions (SPEC §5.3, §6.6). */
+  chain: {
+    /** Vehicle pixels a blast must destroy before the rest of the car goes up. */
+    minVehiclePixels: number;
+    /** Secondary blast radius, relative to the one that set it off. */
+    radiusScale: number;
+    /** Hard cap on chain length, so one car park cannot loop forever. */
+    maxDepth: number;
+    /** How far beyond the crater to look for the rest of the vehicle. */
+    searchPad: number;
+  };
   selfPropelGapMin: number;
   shake: { max: number; radius: number };
 }
@@ -37,8 +48,12 @@ export function parseWeaponTune(raw: WeaponTune): WeaponTune {
   if (!(raw.selfPropelGapMin > 0)) {
     throw new Error(`tune/weapon.json: selfPropelGapMin must be positive`);
   }
+  if (!Number.isInteger(raw.chain.maxDepth) || raw.chain.maxDepth < 0) {
+    throw new Error(`tune/weapon.json: chain.maxDepth must be a non-negative integer`);
+  }
   return {
     ...raw,
+    chain: { ...raw.chain },
     muzzleVelocity: { ...raw.muzzleVelocity },
     projectile: { ...raw.projectile },
     damage: curve(raw.damage, 'damage'),
