@@ -552,3 +552,77 @@ interesting, and "long" is the first thing to look at — `moveSeconds`,
   phone a 1600px map is drawn small and craters are hard to read.
 - Retreat time after firing exists (`retreatSeconds`) but there is no camera to
   follow the shot with yet.
+
+---
+
+## Stage 6 — Camera (2026-09-05)
+
+Deliverable (SPEC §12, day 6): camera + three full matches playable.
+Exit criteria: arc and shooter framed on fire; matches complete without hangs.
+
+### Status: met. **Gate 2 is next, and it is a hard stop.**
+
+140 tests pass, 11 of them the camera's. Three matches run to a result with
+zero settle timeouts, with the camera driving.
+
+### Built
+
+```
+/src/camera/camera.ts   follow, frame, pan, pinch zoom, shake, map clamping
+/tune/camera.json
+/tests/camera.test.ts   11 tests
+```
+
+Camera policy, in priority order:
+
+1. **A shot in the air** — follow it, looking `projectileLeadSeconds` ahead of
+   its velocity so the landing is on screen before it lands.
+2. **Aiming** — frame the shooter and the whole predicted arc together. This is
+   the one §6.5 calls the reason to have a camera module at all, and it is the
+   thing that makes an arc readable on a phone.
+3. **Otherwise** — sit on whoever is up.
+
+A manual pan or pinch overrides all three for `freeReturnSeconds`.
+
+### Decisions
+
+- **Exponential approach, not a fixed lerp.** `1 - exp(-rate * dt)` gives the
+  same smoothing at any frame rate; a bare `lerp(a, b, 0.1)` per frame moves
+  twice as fast at 120fps as at 60. There is a test that runs the same follow
+  at 30fps and 120fps and expects the same position.
+- **Framing is capped by the zoom limits**, so a wild shot that would need a
+  0.05× zoom does not turn the map into a postage stamp — it just goes off
+  screen, which is honest.
+- **Clamping centres an axis where the map is smaller than the view** rather
+  than pinning it to an edge, so a short map does not sit against the top.
+- **Shake has its own throwaway generator.** It must not touch the seeded RNG
+  the simulation uses, or watching a match would change how it plays.
+- **`tune/camera.json` is new** and not in §7's list, like the terrain
+  validation block. Everything in it affects feel, so JSON is where it belongs.
+
+### Also fixed
+
+The dev HUD covered about a third of a phone screen. It is now two panels: the
+match state stays, and the performance diagnostics move to the right and hide
+under 720px wide. Mobile is the primary target (§1.4); a diagnostic that eats
+the screen it is diagnosing is worth less than the screen.
+
+### Gate 2 — what to do
+
+Playable build: https://claude.ai/code/artifact/c6c5dfba-8bbb-4f27-85cc-a14c1c27b2e6
+
+Play **three full matches**. The question is not whether firing is satisfying —
+gate 1 settled that — but whether **a match is interesting, and whether anyone
+wants a fourth**.
+
+If the answer is no, SPEC §12.2 is explicit: the grenade moves from post-v1 to
+now. It is bouncy and timed, a different tactical shape, and about half a day.
+
+Things worth watching for, with the numbers already in hand:
+
+- **Length.** Self-played matches ran 31, 57 and 47 rounds. `moveSeconds`,
+  `damage.max` and `suddenDeathRound` are the dials.
+- **Range.** ~498px at full power on a 1600px map. You may find you spend more
+  turns walking than shooting.
+- **Aim scheme.** Now that the map can be panned, the corner widget (`[m]`) can
+  finally be judged against drag-from-the-monkey properly.

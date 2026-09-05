@@ -10,10 +10,17 @@
       html, body { margin: 0; height: 100%; background: #0e1116; overflow: hidden; }
       body { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eef5; }
       canvas { display: block; touch-action: none; }
-      #hud {
-        position: fixed; top: 8px; left: 8px; padding: 10px 12px;
+      #hud, #perf {
+        position: fixed; left: 8px; padding: 10px 12px;
         background: rgba(10, 13, 18, 0.82); border: 1px solid #263041; border-radius: 6px;
         white-space: pre; pointer-events: none; max-width: calc(100vw - 16px);
+      }
+      #hud { top: 8px; }
+      #perf { top: 8px; right: 8px; left: auto; color: #8b9bb0; }
+      /* On a phone the diagnostics are worth less than the screen they cover. */
+      @media (max-width: 720px) {
+        #perf { display: none; }
+        #hud { font-size: 11px; padding: 7px 9px; }
       }
       #hud b { color: #ff2e63; font-weight: 600; }
       #hud .ok { color: #8ee06a; }
@@ -27,7 +34,8 @@
   </head>
   <body>
     <div id="hud">booting…</div>
-    <div id="help">drag from the monkey to aim, release to fire · [f] fire · [i] AI shot · [m] aim scheme · [←/→] walk · [space] jump · [k] AI on/off · [n] new match · [t] tuning · [shift+click] spot blast · [r] reload map</div>
+    <div id="perf"></div>
+    <div id="help">drag from the monkey to aim, release to fire · [f] fire · [i] AI shot · [m] aim scheme · [←/→] walk · [space] jump · [k] AI on/off · [n] new match · [t] tuning · [shift+click] spot blast · drag/pinch or scroll to pan &amp; zoom · [r] reload map</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

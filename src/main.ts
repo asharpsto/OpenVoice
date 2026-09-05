@@ -1,4 +1,5 @@
 import { Application, BufferImageSource, Container, Graphics, ImageSource, Texture } from 'pixi.js';
+import { boundsOf, Camera } from './camera/camera.js';
 import { FixedLoop } from './core/loop.js';
 import { mulberry32 } from './core/rng.js';
 import { createBody, type Body } from './physics/body.js';
@@ -9,6 +10,7 @@ import { createWind, windFraction } from './wind/wind.js';
 import { getAiTune } from './tune/ai.js';
 import { getWeaponTune } from './tune/weapon.js';
 import { getWindTune } from './tune/wind.js';
+import { getCameraTune } from './tune/camera.js';
 import { getTurnTune } from './tune/turn.js';
 import { TurnMachine, type TurnTunes } from './turn/machine.js';
 import { TEAM_NAMES, type Match, type Monkey, type TeamId } from './turn/match.js';
@@ -16,7 +18,7 @@ import { TEAM_NAMES, type Match, type Monkey, type TeamId } from './turn/match.j
 import { CircleCollider } from './physics/collider.js';
 import type { CharacterInput } from './physics/controller.js';
 import { buildStreetScene } from './dev/streetScene.js';
-import { explode, type ExplosionResult } from './terrain/destroy.js';
+import { explode } from './terrain/destroy.js';
 import { loadMap } from './terrain/load.js';
 import { BROADPHASE_CELL_SIZE, type Mask } from './terrain/mask.js';
 import { TerrainView } from './terrain/render.js';
@@ -58,6 +60,7 @@ const PREVIEW = { points: 46, secondsPerPoint: 0.07 };
 type AimScheme = 'drag' | 'widget';
 
 const hud = document.getElementById('hud') as HTMLDivElement;
+const perf = document.getElementById('perf') as HTMLDivElement | null;
 
 class Samples {
   private readonly values: number[] = [];
@@ -125,7 +128,6 @@ async function main(): Promise<void> {
   let aimAngle = -Math.PI / 4;
   let aimPower = 0.6;
   let aiming = false;
-  let shake = 0;
   let lastShot = '';
   /**
    * Who the AI plays. 'both' lets a match play itself, which is how you watch
@@ -230,7 +232,7 @@ async function main(): Promise<void> {
         if (active) {
           const distance = Math.hypot(active.body.x - blast.x, active.body.y - blast.y);
           const weapon = getWeaponTune();
-          shake = Math.max(shake, shakeAt(distance, weapon.shake.max, weapon.shake.radius));
+          camera.addShake(shakeAt(distance, weapon.shake.max, weapon.shake.radius));
         }
       }
       turn.pendingBlasts = [];
@@ -241,7 +243,6 @@ async function main(): Promise<void> {
     if (aiPlaysThisTurn && (turn.phase === 'MOVE' || turn.phase === 'AIM')) {
       if (turn.timer < getTurnTune().moveSeconds - 0.8) aiTurn();
     }
-    shake *= 0.88;
   });
 
   /** Teams by accessory colour, active marker in the reserved accent (§11.2). */
@@ -316,20 +317,22 @@ async function main(): Promise<void> {
   const destruction = new Samples();
   const blits = new Samples();
   const uploads = new Samples();
-  let last: (ExplosionResult & { blitMs: number }) | null = null;
   let radius = RADII[1];
   let stressLeft = 0;
 
-  const worldHome = { x: 0, y: 0 };
+  const camera = new Camera(width, height);
+  function viewport(): { width: number; height: number } {
+    return { width: app.screen.width, height: app.screen.height };
+  }
   function fit(): void {
-    const scale = Math.min(app.screen.width / width, app.screen.height / height);
-    world.scale.set(scale);
-    worldHome.x = (app.screen.width - width * scale) / 2;
-    worldHome.y = (app.screen.height - height * scale) / 2;
-    world.position.set(worldHome.x, worldHome.y);
+    const t = getCameraTune();
+    camera.frame({ x: 0, y: 0, width, height }, viewport(), t);
+    camera.reset(width / 2, height / 2, Math.min(
+      viewport().width / width, viewport().height / height,
+    ));
   }
   fit();
-  app.renderer.on('resize', fit);
+  app.renderer.on('resize', () => camera.update(0, viewport(), getCameraTune()));
 
   function fire(x: number, y: number): void {
     const t0 = performance.now();
@@ -338,7 +341,6 @@ async function main(): Promise<void> {
     if (result.clearedTotal === 0) return;
     view.applyExplosion(result);
     const upload = view.lastUpload;
-    last = { ...result, blitMs };
     blits.push(blitMs);
     if (upload) {
       uploads.push(upload.uploadMs);
@@ -364,6 +366,12 @@ async function main(): Promise<void> {
 
   app.canvas.addEventListener('pointerdown', (event: PointerEvent) => {
     app.canvas.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, screenOf(event));
+    if (pointers.size >= 2) {
+      aiming = false;
+      panning = false;
+      return;
+    }
     if (event.shiftKey) {
       fire(toWorld(event).x, toWorld(event).y); // spot blast, for terrain testing
       return;
@@ -376,6 +384,9 @@ async function main(): Promise<void> {
       if (Math.hypot(px - centre.x, py - centre.y) <= WIDGET.radius) {
         aiming = true;
         setAimFrom(px - centre.x, py - centre.y, WIDGET.radius);
+      } else {
+        // The whole point of the widget: the map is free to drag around.
+        panning = true;
       }
       return;
     }
@@ -386,7 +397,39 @@ async function main(): Promise<void> {
     setAimFrom(local.x - active.body.x, local.y - active.body.y, 190);
   });
 
+  /** Live pointers, so two fingers can pinch while one finger pans or aims. */
+  const pointers = new Map<number, { x: number; y: number }>();
+  let pinchDistance = 0;
+  let panning = false;
+
+  function screenOf(event: PointerEvent): { x: number; y: number } {
+    const bounds = app.canvas.getBoundingClientRect();
+    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  }
+
   app.canvas.addEventListener('pointermove', (event: PointerEvent) => {
+    const here = screenOf(event);
+    const previous = pointers.get(event.pointerId);
+    pointers.set(event.pointerId, here);
+
+    if (pointers.size >= 2) {
+      // Pinch: two fingers zoom about the point between them.
+      const [a, b] = [...pointers.values()];
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinchDistance > 0 && distance > 0) {
+        camera.zoomAt(
+          (a.x + b.x) / 2, (a.y + b.y) / 2,
+          distance / pinchDistance, viewport(), getCameraTune(),
+        );
+      }
+      pinchDistance = distance;
+      aiming = false;
+      return;
+    }
+    if (panning && previous) {
+      camera.panBy(here.x - previous.x, here.y - previous.y, getCameraTune());
+      return;
+    }
     if (!aiming) return;
     if (scheme === 'widget') {
       const centre = widgetCentre();
@@ -400,11 +443,36 @@ async function main(): Promise<void> {
     setAimFrom(local.x - active.body.x, local.y - active.body.y, 190);
   });
 
-  app.canvas.addEventListener('pointerup', () => {
+  app.canvas.addEventListener('pointerup', (event: PointerEvent) => {
+    pointers.delete(event.pointerId);
+    if (pointers.size < 2) pinchDistance = 0;
+    panning = false;
     if (!aiming) return;
     aiming = false;
     fireBanana();
   });
+  app.canvas.addEventListener('pointercancel', (event: PointerEvent) => {
+    pointers.delete(event.pointerId);
+    pinchDistance = 0;
+    panning = false;
+    aiming = false;
+  });
+  app.canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+  app.canvas.addEventListener(
+    'wheel',
+    (event: WheelEvent) => {
+      event.preventDefault();
+      const bounds = app.canvas.getBoundingClientRect();
+      camera.zoomAt(
+        event.clientX - bounds.left,
+        event.clientY - bounds.top,
+        event.deltaY < 0 ? 1.12 : 1 / 1.12,
+        viewport(),
+        getCameraTune(),
+      );
+    },
+    { passive: false },
+  );
 
   function drawGrid(): void {
     gridOverlay.clear();
@@ -429,7 +497,6 @@ async function main(): Promise<void> {
     destruction.clear();
     blits.clear();
     uploads.clear();
-    last = null;
     if (gridOverlay.visible) drawGrid();
   }
 
@@ -541,14 +608,7 @@ async function main(): Promise<void> {
     drawBodies();
     drawWater();
     drawAim();
-    if (shake > 0.4) {
-      world.position.set(
-        worldHome.x + (Math.random() - 0.5) * shake,
-        worldHome.y + (Math.random() - 0.5) * shake,
-      );
-    } else if (world.position.x !== worldHome.x || world.position.y !== worldHome.y) {
-      world.position.set(worldHome.x, worldHome.y);
-    }
+    driveCamera(ticker.deltaMS / 1000);
     if (stressLeft > 0) {
       stressLeft--;
       fire(rng() * width, height * 0.4 + rng() * height * 0.55);
@@ -557,33 +617,73 @@ async function main(): Promise<void> {
     updateHud();
   });
 
+  /**
+   * Camera policy (SPEC §6.5): follow the shot while it is in the air, frame
+   * the shooter and the whole arc while aiming, and otherwise sit on whoever
+   * is up. A manual pan or pinch overrides all of it for a few seconds.
+   */
+  function driveCamera(dt: number): void {
+    const t = getCameraTune();
+    const view = viewport();
+    const projectile = turn.projectile;
+
+    if (projectile) {
+      // Look slightly ahead of it, so the landing is on screen before it lands.
+      camera.follow(
+        projectile.x + projectile.vx * t.projectileLeadSeconds,
+        projectile.y + projectile.vy * t.projectileLeadSeconds,
+        t,
+      );
+    } else {
+      const active = turn.activeMonkey;
+      if (active) {
+        if (aiming || turn.phase === 'AIM') {
+          const arc = previewArc(
+            active.body.x, active.body.y, aimAngle, power(), mask,
+            getPhysicsTune().gravity, turn.wind.x, getWeaponTune().projectile, PREVIEW,
+          );
+          camera.frame(boundsOf([{ x: active.body.x, y: active.body.y }, ...arc]), view, t);
+        } else {
+          camera.follow(active.body.x, active.body.y, t);
+        }
+      }
+    }
+
+    camera.update(dt, view, t);
+    const transform = camera.containerTransform(view);
+    world.position.set(transform.x, transform.y);
+    world.scale.set(transform.scale);
+  }
+
   function updateHud(): void {
-    const p99 = destruction.percentile(0.99);
-    const withinBudget = destruction.count === 0 || p99 <= BUDGET_MS;
     const lines = [
-      `map      ${source.label}  ${width}x${height}  mask ${(mask.data.byteLength / 1048576).toFixed(2)}MB  solid ${(mask.solidFraction * 100).toFixed(1)}%`,
-      `validate ${validation.ok ? 'ok' : 'FAILED'}  spawns ${validation.spawns.length}  islands ${validation.islandSpawns.length}`,
-      `frame    p50 ${frames.percentile(0.5).toFixed(2)}ms  p99 ${frames.percentile(0.99).toFixed(2)}ms`,
-      `radius   ${radius}px${stressLeft > 0 ? `   stress ${stressLeft} left` : ''}`,
       turn.phase === 'MATCH_OVER'
-        ? `MATCH    ${turn.outcome.winner === null ? 'a draw' : `team ${TEAM_NAMES[turn.outcome.winner]} wins`}   [n] new match`
-        : `turn     team ${TEAM_NAMES[match.turnTeam]}  ${turn.phase}  ${Math.max(0, turn.timer).toFixed(0)}s  round ${match.round}`,
+        ? `MATCH  ${turn.outcome.winner === null ? 'a draw' : `team ${TEAM_NAMES[turn.outcome.winner]} wins`}   [n] new match`
+        : `turn   team ${TEAM_NAMES[match.turnTeam]}  ${turn.phase}  ${Math.max(0, turn.timer).toFixed(0)}s  round ${match.round}`,
       turn.activeMonkey
-        ? `monkey   #${turn.activeMonkey.id}  hp ${Math.max(0, turn.activeMonkey.health).toFixed(0)}  ${turn.activeMonkey.body.grounded ? 'grounded' : 'airborne'}`
-        : 'monkey   —',
-      `alive    A ${match.monkeys.filter((m) => m.alive && m.team === 0).length}  ·  B ${match.monkeys.filter((m) => m.alive && m.team === 1).length}  ·  AI ${autoAi} [k]`,
-      `wind     ${turn.wind.x < 0 ? '<<' : '>>'} ${Math.abs(turn.wind.x).toFixed(0)}  (${(windFraction(turn.wind, getWindTune()) * 100).toFixed(0)}%)`,
-      `aim      ${scheme}  ${((-aimAngle * 180) / Math.PI).toFixed(0)}°  power ${(aimPower * 100).toFixed(0)}%`,
-      `shot     ${lastShot || '—'}`,
-      '',
-      last
-        ? `last     cleared ${last.clearedTotal}px  dirty ${last.dirtyRect.width}x${last.dirtyRect.height}  ${((view.lastUpload?.bytes ?? 0) / 1024).toFixed(1)}KB`
-        : 'last     —',
-      `  blit           ${blits.percentile(0.5).toFixed(3)}ms p50   ${blits.percentile(0.99).toFixed(3)}ms p99`,
-      `  texSubImage2D  ${uploads.percentile(0.5).toFixed(3)}ms p50   ${uploads.percentile(0.99).toFixed(3)}ms p99`,
-      `  blit+patch+upload p99 ${p99.toFixed(3)}ms / ${BUDGET_MS}ms  ${withinBudget ? 'OK' : 'OVER'}`,
-      `  (${destruction.count} craters measured)`,
+        ? `monkey #${turn.activeMonkey.id}  hp ${Math.max(0, turn.activeMonkey.health).toFixed(0)}`
+        : 'monkey —',
+      `alive  A ${match.monkeys.filter((m) => m.alive && m.team === 0).length}  ·  B ${match.monkeys.filter((m) => m.alive && m.team === 1).length}  ·  AI ${autoAi} [k]`,
+      `wind   ${turn.wind.x < 0 ? '<<' : '>>'} ${Math.abs(turn.wind.x).toFixed(0)}  (${(windFraction(turn.wind, getWindTune()) * 100).toFixed(0)}%)`,
+      `aim    ${scheme}  ${((-aimAngle * 180) / Math.PI).toFixed(0)}°  power ${(aimPower * 100).toFixed(0)}%`,
+      `shot   ${lastShot || '—'}`,
     ];
+
+    if (perf) {
+      const p99 = destruction.percentile(0.99);
+      const within = destruction.count === 0 || p99 <= BUDGET_MS;
+      perf.innerHTML = [
+        `${source.label}  ${width}x${height}  mask ${(mask.data.byteLength / 1048576).toFixed(2)}MB  solid ${(mask.solidFraction * 100).toFixed(1)}%`,
+        `validate ${validation.ok ? 'ok' : 'FAILED'}  spawns ${validation.spawns.length}  islands ${validation.islandSpawns.length}`,
+        `frame p50 ${frames.percentile(0.5).toFixed(1)}ms  p99 ${frames.percentile(0.99).toFixed(1)}ms  zoom ${(camera.zoom * 100).toFixed(0)}%`,
+        `blit ${blits.percentile(0.5).toFixed(2)}  upload ${uploads.percentile(0.5).toFixed(2)}  total p99 ${p99.toFixed(2)}ms / ${BUDGET_MS}ms  ${within ? 'OK' : 'OVER'}`,
+        `(${destruction.count} craters)`,
+      ]
+        .join('\n')
+        .replace(/\bOK\b/g, '<span class="ok">OK</span>')
+        .replace(/\bOVER\b|\bFAILED\b/g, '<span class="over">$&</span>');
+    }
+
     hud.innerHTML = lines
       .join('\n')
       .replace(/\bOK\b/g, '<span class="ok">OK</span>')

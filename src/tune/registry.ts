@@ -3,6 +3,7 @@ import weaponRaw from '../../tune/weapon.json';
 import windRaw from '../../tune/wind.json';
 import aiRaw from '../../tune/ai.json';
 import turnRaw from '../../tune/turn.json';
+import cameraRaw from '../../tune/camera.json';
 import physicsRaw from '../../tune/physics.json';
 import monkeyRaw from '../../tune/monkey.json';
 import { parseTerrainTune, setTerrainTune, type TerrainTuneJson } from './terrain.js';
@@ -12,6 +13,8 @@ import { parseWeaponTune, setWeaponTune, type WeaponTune } from './weapon.js';
 import { parseWindTune, setWindTune } from './wind.js';
 import { parseAiTune, setAiTune } from './ai.js';
 import { parseTurnTune, setTurnTune, type TurnTune } from './turn.js';
+import { parseCameraTune, setCameraTune } from './camera.js';
+import type { CameraTune } from '../camera/camera.js';
 import type { AiTune } from '../ai/aim.js';
 import type { WindTune } from '../wind/wind.js';
 
@@ -184,8 +187,25 @@ const turn: TuneSpec = {
   },
 };
 
+const camera: TuneSpec = {
+  name: 'camera',
+  raw: copy(cameraRaw) as unknown as Record<string, unknown>,
+  fields: [
+    { path: 'followLag', min: 0.5, max: 20, step: 0.5 },
+    { path: 'zoomLag', min: 0.5, max: 20, step: 0.5 },
+    { path: 'followZoom', min: 0.3, max: 3, step: 0.05 },
+    { path: 'framePadding', min: 0, max: 400, step: 10 },
+    { path: 'shakeDecay', min: 1, max: 20, step: 0.5 },
+    { path: 'freeReturnSeconds', min: 0, max: 10, step: 0.5 },
+    { path: 'projectileLeadSeconds', min: 0, max: 1, step: 0.02 },
+  ],
+  apply() {
+    setCameraTune(parseCameraTune(this.raw as unknown as CameraTune));
+  },
+};
+
 /** Every tunable file. */
-export const TUNE_SPECS: TuneSpec[] = [terrain, physics, monkey, weapon, wind, ai, turn];
+export const TUNE_SPECS: TuneSpec[] = [terrain, physics, monkey, weapon, wind, ai, turn, camera];
 
 export function specByName(name: string): TuneSpec | undefined {
   return TUNE_SPECS.find((spec) => spec.name === name);

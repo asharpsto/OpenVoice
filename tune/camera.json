@@ -1,0 +1,12 @@
+{
+  "$comment": "Camera. SPEC §6.5. Not in §7's original list, but every value here affects feel, so it belongs in JSON like the rest.",
+  "followLag": 5.5,
+  "zoomLag": 3.5,
+  "minZoom": 0.3,
+  "maxZoom": 3,
+  "followZoom": 1,
+  "framePadding": 110,
+  "shakeDecay": 7,
+  "freeReturnSeconds": 2.5,
+  "projectileLeadSeconds": 0.22
+}
