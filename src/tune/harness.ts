@@ -27,6 +27,7 @@ export function mountTuneHarness(options: HarnessOptions): HTMLElement {
     #tune-overlay {
       position: fixed; top: 8px; right: 8px; width: 292px; max-height: calc(100vh - 16px);
       overflow-y: auto; z-index: 40; padding: 10px 12px 12px;
+      max-width: calc(100vw - 16px);
       background: rgba(11, 14, 19, .92); border: 1px solid #263041; border-radius: 6px;
       font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eef5;
     }
@@ -109,6 +110,9 @@ export function mountTuneHarness(options: HarnessOptions): HTMLElement {
   }
 
   root.appendChild(status);
+  // Opt-in: the panel is a tool, not the view. It would swamp a phone screen
+  // if it opened over the game every time.
+  root.classList.add('collapsed');
   document.body.appendChild(root);
 
   window.addEventListener('keydown', (event) => {
@@ -155,6 +159,12 @@ function scheduleSave(spec: TuneSpec, status: HTMLElement): void {
   timers.set(
     spec.name,
     window.setTimeout(() => {
+      if (!import.meta.hot) {
+        // A playtest build has no dev server to write to. Say so plainly
+        // rather than reporting a failure — the values still apply live.
+        setStatus(status, 'live only — no dev server to save to');
+        return;
+      }
       const body = JSON.stringify(spec.raw, null, 2);
       fetch(`${TUNE_ROUTE}${spec.name}`, { method: 'POST', body })
         .then((response) => {

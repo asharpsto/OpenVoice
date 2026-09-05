@@ -449,12 +449,18 @@ Also fixed two things flagged earlier and left undone:
 
 ### Gate 1 — what to do
 
-`npm run dev`, then play for twenty minutes. The question is only: **is firing
+Playable build: https://claude.ai/code/artifact/c6c5dfba-8bbb-4f27-85cc-a14c1c27b2e6
+(single file, no install, works on a phone — which is where the aim schemes
+should be judged). Or `npm run dev`. Play for twenty minutes. The question is only: **is firing
 satisfying?** Not whether it looks good — it deliberately does not.
 
 - Drag from a monkey and release to fire; `[m]` swaps to the corner widget.
   §6.3 says decide between them by testing, so try both and say which.
 - `[i]` takes an AI shot, `[w]` rerolls the wind, `[t]` opens the sliders.
 - If it is not fun, the answer is to tune, not to build stage 5. Everything
-  that affects feel is on a slider and writes back to disk, so what you land on
-  is kept.
+  that affects feel is on a slider. In `npm run dev` those write back to disk;
+  in the published build they apply live but cannot save, so note the numbers.
+
+**One thing to undo later:** the slider overlay is currently mounted in
+production builds too (disable with `?notune`). That was the right trade while
+the only builds are playtests, but a shipping build must exclude it.

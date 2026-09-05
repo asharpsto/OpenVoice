@@ -470,7 +470,13 @@ async function main(): Promise<void> {
     }
   });
 
-  if (import.meta.env.DEV) {
+  // The sliders matter at gate 1: if firing is not satisfying the answer is to
+  // tune, not to build the next stage. So they are mounted in playtest builds
+  // too, where write-back has no dev server to talk to and says so.
+  //
+  // A shipping build must exclude this; there isn't one yet, and until there
+  // is, being able to tune whatever you are playing is worth more.
+  if (!new URLSearchParams(location.search).has('notune')) {
     const [{ mountTuneHarness }, { TUNE_SPECS }] = await Promise.all([
       import('./tune/harness.js'),
       import('./tune/registry.js'),
